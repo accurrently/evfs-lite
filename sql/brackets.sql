@@ -54,3 +54,4 @@ WITH offsignals AS (
   ORDER BY
       b1.EventTime
   {order}
+  
