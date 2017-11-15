@@ -2,7 +2,7 @@ from __future__ import absolute_import
 
 import argparse
 import logging
-import re, datetime
+import re, datetime, os
 
 
 
@@ -50,3 +50,10 @@ def get_args(argv=None):
     return parser.parse_args()
 
 ARGS = get_args()
+
+def load_sql(filename):
+    path = os.path.join('sql', filename)
+    q = None
+    with open(path, 'r') as thefile:
+        q = thefile.read().replace('\n', '').replace('\t', ' ')
+    return q

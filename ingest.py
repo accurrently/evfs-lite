@@ -110,17 +110,18 @@ def run(argv=None):
 
         p = beam.Pipeline(options=opts)
 
-    	xcrows = p | "Open XC Files " >> ReadFromText(folder['path'])
+        xcrows = p | "Open XC Files " >> ReadFromText(folder['path'])
 
-        lines = xcrows | "Map raw Event rows for BQ" >> beam.Map(make_record, folder['vehicle_id']) 
+        lines = xcrows | "Map raw Event rows for BQ" >> beam.Map(make_record, folder['vehicle_id'])
 
-    	lines | "Output data to BigQuery" >> beam.io.Write(beam.io.BigQuerySink(
+        lines | "Output data to BigQuery" >> beam.io.Write(beam.io.BigQuerySink(
                                                 RawEvents.full_table_name,
                                                 schema=RawEvents.schema,
                                                 create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
                                                 write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
-    	result = p.run()
-    	result.wait_until_finish()
+
+        result = p.run()
+        result.wait_until_finish()
 
     move_xcfiles(xcfiles, bucket_name='dumbdata')
 

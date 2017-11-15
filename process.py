@@ -1,7 +1,7 @@
 from google.cloud import bigquery
 import settings
 from schemas import RawEvents, FleetDailyStats, GPSTrace, Stops, Trips, DATASET_NAME
-import statistics, uuid
+import statistics, uuid, logging, datetime, time
 
 import apache_beam as beam
 from apache_beam.io import ReadFromText
@@ -15,66 +15,9 @@ from apache_beam.options.pipeline_options import StandardOptions
 from google.cloud import storage
 
 
-def get_bracket_query_str(vehicle, signal, value, order='ASC', prebracket_begin = 0, prebracket_end = 'NOW()'):
-    q = """\
-    WITH offsignals AS (
-        SELECT
-            VehicleID,
-            EventTime,
-            Signal,
-            Value
-        FROM
-            {table_name}
-        WHERE (
-            Signal = "{signal}"
-            AND (EventTime >= {prebracket_begin})
-            AND (EventTime <= {prebracket_end})
-        )
-        ORDER BY EventTime ASC
-    ),
-    a AS (
-        SELECT
-            Value,
-            Signal,
-            EventTime,
-            ROW_NUMBER() OVER(ORDER BY EventTime) AS RN
-        FROM
-            offsignals ),
-    b AS (
-        SELECT
-        a1.Value,
-        a1.EventTime,
-        ROW_NUMBER() OVER(ORDER BY a1.EventTime) AS RN
-        FROM
-            a a1
-        LEFT OUTER JOIN
-            a a2
-        ON
-            a2.RN = a1.RN - 1
-        WHERE
-            (a1.Signal = "{signal}")
-            AND ((a1.Value != a2.Value) OR (a2.RN IS NULL))
-    )
-    SELECT
-        b1.VehicleID AS VehicleID
-        b1.Value AS Value,
-        b1.EventTime AS StartTime,
-        b2.EventTime AS EndTime,
-        timestamp_diff(b2.EventTime,b1.EventTime, SECOND) AS Duration
-    FROM
-        b b1
-    LEFT OUTER JOIN
-        b b2
-    ON
-        b2.RN = b1.RN + 1
-    WHERE
-        b1.Value = "{value}"
-    ORDER BY
-        b1.EventTime
-    {order}
-    """
-
-    return q.format(
+def get_bracket_query_str(vehicle, signal, value, order='ASC',
+                            prebracket_begin = 0, prebracket_end = time.time() ):
+    return settings.load_sql('brackets.sql').format(
         table_name=RawEvents.full_table_name,
         signal=signal,
         value=value,
@@ -110,10 +53,9 @@ def trip_distance(vehicle_id, trip_begin, trip_end, odometer_signal='odometer'):
     """
     Returns the distance traveled (by odometer) for a trip.
     """
-    q = """\
+    q = """
         SELECT
-            FLOAT(Value) AS OdoVal,
-            EventTime
+            MAX(FLOAT(Value)) - MIN(FLOAT(Value)) AS Distance,
         FROM
             {the_table}
         WHERE (
@@ -122,9 +64,7 @@ def trip_distance(vehicle_id, trip_begin, trip_end, odometer_signal='odometer'):
             AND (VehicleID = "{vehicle_id}")
             AND (Signal = "{odometer}")
         )
-        ORDER BY
-            EventTime
-        ASC
+        LIMIT 1
         """.format(
         the_table=RawEvents.full_table_name,
         begin_bracket=trip_begin,
@@ -139,19 +79,16 @@ def trip_distance(vehicle_id, trip_begin, trip_end, odometer_signal='odometer'):
     destination_table = job.destination
     destination_table.reload()
     rows = destination_table.fetch_data()
-    initial_val = False
-    current_val = initial_val
+    dist = 0
     for row in rows:
-        if initial_val == False:
-            initial_val = row['OdoVal']
-        current_val = row['OdoVal']
-    return current_val - initial_val
+        dist = row['Distance']
+    return dist
 
 def trip_engine_starts(vehicle_id, trip_begin, trip_end, engine_signal='engine_start'):
     """
     Get the number of times the engine starts during the trip.
     """
-    q ="""\
+    q ="""
     SELECT
         Value,
         EventTime
@@ -200,7 +137,7 @@ def trip_fuel_consumed(vehicle_id, trip_begin, trip_end, engine_signal='fuel_con
     """
     Get the amount of fuel used for the trip.
     """
-    q ="""\
+    q ="""
     SELECT
         Value,
         EventTime
@@ -244,7 +181,7 @@ def trip_electric_distance(vehicle_id, trip_begin, trip_end, engine_signal='engi
     return dist
 
 def trip_fuel_used(vehicle_id, trip_begin, trip_end, signal='fuel_consumed_since_restart'):
-    q = """\
+    q = """
         SELECT
             Value
         FROM
@@ -271,26 +208,32 @@ def trip_fuel_used(vehicle_id, trip_begin, trip_end, signal='fuel_consumed_since
 
 class TripProcessDoFn(beam.DoFn):
     def process(self, element):
+        logging.info('Processing a trip...')
 
+        logging.info('Looking up distance from odometer...')
         dist = element | "Distance traveled for trip" >> beam.Map(
             trip_distance,
             element['VehicleID'], element['StartTime'], element['EndTime'])
 
+        logging.info('Looking for engine starts...')
         starts = element | "Engine starts on trip" >> beam.Map(
             trip_engine_starts,
             element['VehicleID'], element['StartTime'], element['EndTime'])
 
+        logging.info('Calculating fuel consumption...')
         fuel_used = element | "Fuel used in trip" >> beam.Map(
             trip_fuel_consumed,
             element['VehicleID'], element['StartTime'], element['EndTime']
             )
 
-        elec_used = element | "Fuel used in trip" >> beam.Map(
+        logging.info('Calculating electricity consumption...')
+        elec_used = element | "Electricity used in trip" >> beam.Map(
             trip_fuel_used,
             element['VehicleID'], element['StartTime'], element['EndTime'],
             signal='electricity_flow_display'
             )
 
+        logging.info('Get electric miles traveled...')
         elec_dist = element | "Get Electric (and fuel) distance" >> beam.Map(
             trip_electric_distance,
             element['VehicleID'], element['StartTime'], element['EndTime']
@@ -309,18 +252,22 @@ class TripProcessDoFn(beam.DoFn):
             'FuelDistance': dist - elec_dist
         }
 
-class ProcessTripData(beam.PTransform):
+def get_vehicle_id(collection):
+    return collection['VehicleID']
+
+class ProcessTripData(beam.DoFn):
     """
     Processes all the trips.
     """
     def expand(self, pcoll):
-        trip_brackets = pcoll | "Read trip brackets" >> beam.io.BigQuerySource(
+
+        trip_brackets = pcoll | "Read trip brackets" >> beam.io.Read(beam.io.BigQuerySource(
             get_bracket_query_str(
                 vehicle=pcoll['VehicleID'],
                 signal='ignition_status',
                 value='run'
             )
-        )
+        ))
         trips = trip_brackets | "Process brackets" >> beam.ParDo(TripProcessDoFn())
 
         trips | "Write rows to BigQuery" >> beam.io.Write(
@@ -343,7 +290,8 @@ class ProcessStopsDoFn(beam.DoFn):
     """
     def process(self, element):
 
-        latitude_query = """\
+        logging.info('Calculating statistics for stop...')
+        latitude_query = """
             SELECT
                 AVG(FLOAT(Value)) AvgValue
             FROM
@@ -405,7 +353,7 @@ class ProcessStopsDoFn(beam.DoFn):
             end_time=element['EndTime']
         )
 
-        charged_query = """\
+        charged_query = """
             SELECT
                 COUNT(*) AS ChargeSignals
             FROM
@@ -450,18 +398,18 @@ class ProcessStopsDoFn(beam.DoFn):
 
 
 
-class ProcessStopData(beam.PTransform):
+class ProcessStopData(beam.DoFn):
     """
     Processes all the stops.
     """
     def expand(self, pcoll):
-        stop_brackets = pcoll | "Read stop brackets" >> beam.io.BigQuerySource(
+        stop_brackets = pcoll | "Read stop brackets" >> beam.ion.Read(beam.io.BigQuerySource(
             get_bracket_query_str(
                 vehicle=pcoll['VehicleID'],
                 signal='ignition_status',
                 value='off'
             )
-        )
+        ))
 
         stops = stop_brackets | "Process stop brackets" >> beam.ParDo(ProcessStopsDoFn())
 
@@ -476,7 +424,7 @@ class ProcessStopData(beam.PTransform):
 
 
 
-def run():
+def run(argv=None):
 
     logging.info('Starting statistical processing job.')
     known_args = settings.ARGS
@@ -488,23 +436,26 @@ def run():
     gopts.project = known_args.project
     gopts.temp_location = 'gs://' + known_args.input + known_args.tempfolder
     gopts.staging_location = 'gs://' + known_args.input + known_args.stagingfolder
-    gopts.job_name = 'openxc-statisticsal-processing-' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    gopts.job_name = 'openxc-statistical-processing-' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     opts.view_as(StandardOptions).runner = known_args.runner
 
-    vehicle_query = """\
+    logging.info('RawEvents table: {table}'.format(table=RawEvents.full_table_name))
+
+    vehicle_query = """
     SELECT DISTINCT VehicleID FROM {table}
     """.format(table=RawEvents.full_table_name)
 
-    vehicles = p | "Get List of Vehicle IDs" >> beam.io.BigQuerySource(
-                                                    query=vehicle_query)
+    with beam.Pipeline(options=opts) as p:
 
+        vehicles = p | "Get List of Vehicle IDs" >> beam.io.Read(beam.io.BigQuerySource(
+                                                        query=vehicle_query))
 
-    trips = vehicles | "Process data for trips" >> ProcessTripData()
+        trips = vehicles | "Process data for trips" >> beam.ParDo(ProcessTripData())
 
-    stops = vehicles | "Process data for stops" >> ProcessStopData()
+        stops = vehicles | "Process data for stops" >> beam.ParDo(ProcessStopData())
 
-    result = p.run()
-    result.wait_until_finish()
+        result = p.run()
+        result.wait_until_finish()
 
 if __name__ == '__main__':
   #logging.basicConfig(filename='testing.log',level=logging.INFO)
