@@ -53,19 +53,7 @@ def trip_distance(vehicle_id, trip_begin, trip_end, odometer_signal='odometer'):
     """
     Returns the distance traveled (by odometer) for a trip.
     """
-    q = """
-        SELECT
-            MAX(FLOAT(Value)) - MIN(FLOAT(Value)) AS Distance,
-        FROM
-            {the_table}
-        WHERE (
-            (EventTime >= {begin_bracket})
-            AND (EventTime <= {end_bracket})
-            AND (VehicleID = "{vehicle_id}")
-            AND (Signal = "{odometer}")
-        )
-        LIMIT 1
-        """.format(
+    q = settings.load_sql('trip_distance.sql').format(
         the_table=RawEvents.full_table_name,
         begin_bracket=trip_begin,
         vehicle_id=vehicle_id,
