@@ -70,7 +70,7 @@ def make_record(element, vid):
         }
     return {}
 
-def make_ignition_status_record(element):
+def make_ignition_status(element):
     if element['Signal'] == 'ignition_status':
         is_on = False
         if element['Value'] == 'run':
@@ -80,6 +80,28 @@ def make_ignition_status_record(element):
             'EventTime': element['EventTime'],
             'Value': is_on
         }
+def make_boolean(element, signal, true_vals = [], false_vals = [], default = False):
+    if element['Signal'] == signal:
+        val = default
+        if element['Value'] in false_vals:
+            val = False
+        if element['Value'] in true_vals:
+            val = True
+        return {
+            'VehicleID': element['VehicleID'],
+            'EventTime': element['EventTime'],
+            'Value': val
+        }
+        
+def make_float(element, signal):
+    if element['Signal'] == signal:
+        return {
+            'VehicleID': element['VehicleID'],
+            'EventTime': element['EventTime'],
+            'Value': float(element['Value'])
+        }
+
+
 
 
 
