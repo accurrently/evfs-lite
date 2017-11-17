@@ -70,6 +70,18 @@ def make_record(element, vid):
         }
     return {}
 
+def make_ignition_status_record(element):
+    if element['Signal'] == 'ignition_status':
+        is_on = False
+        if element['Value'] == 'run':
+            is_on = True
+        return {
+            'VehicleID': element['VehicleID'],
+            'EventTime': element['EventTime'],
+            'Value': is_on
+        }
+
+
 
 def run(argv=None):
     """

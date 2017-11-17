@@ -44,6 +44,42 @@ class RawEvents(EVBQT):
         {'name': 'Value', 'type': 'string'}
     ])
 
+class EngineRunStatus(EVBQT):
+    """
+    Engine status signal table. Value will be True for ignition status set to "run",
+    and False for "off".
+    """
+    table_name = 'EngineRunStatus'
+    full_table_name = DATASET_NAME + '.' table_name
+    schema = bq_table([
+        {'name': 'VehicleID', 'type': 'string'},
+        {'name': 'EventTime', 'type': 'timestamp'},
+        {'name': 'Value', 'type': 'boolean'}
+    ])
+
+class Odometer(EVBQT):
+    """
+    Odometer reading in km.
+    """
+    table_name = 'Odometer'
+    full_table_name = DATASET_NAME + '.' table_name
+    schema = bq_table([
+        {'name': 'VehicleID', 'type': 'string'},
+        {'name': 'EventTime', 'type': 'timestamp'},
+        {'name': 'Value', 'type': 'float'}
+    ])
+
+class FuelSinceRestart(EVBQT):
+    """
+    Fuel used since restart in l.
+    """
+    table_name = 'Odometer'
+    full_table_name = DATASET_NAME + '.' table_name
+    schema = bq_table([
+        {'name': 'VehicleID', 'type': 'string'},
+        {'name': 'EventTime', 'type': 'timestamp'},
+        {'name': 'Value', 'type': 'float'}
+    ])
 
 class Trips(EVBQT):
     """
