@@ -80,6 +80,7 @@ def make_ignition_status(element):
             'EventTime': element['EventTime'],
             'Value': is_on
         }
+
 def make_boolean(element, signal, true_vals = [], false_vals = [], default = False):
     if element['Signal'] == signal:
         val = default
@@ -92,13 +93,21 @@ def make_boolean(element, signal, true_vals = [], false_vals = [], default = Fal
             'EventTime': element['EventTime'],
             'Value': val
         }
-        
+
 def make_float(element, signal):
     if element['Signal'] == signal:
         return {
             'VehicleID': element['VehicleID'],
             'EventTime': element['EventTime'],
             'Value': float(element['Value'])
+        }
+
+def make_int(element, signal):
+    if element['Signal'] == signal:
+        return {
+            'VehicleID': element['VehicleID'],
+            'EventTime': element['EventTime'],
+            'Value': int(element['Value'])
         }
 
 
