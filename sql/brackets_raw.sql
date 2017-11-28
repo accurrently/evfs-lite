@@ -2,11 +2,13 @@ WITH offsignals AS (
       SELECT
           VehicleID,
           EventTime,
+          Signal,
           Value
       FROM
           {table_name}
       WHERE (
-          (EventTime >= {prebracket_begin})
+          Signal = "{signal}"
+          AND (EventTime >= {prebracket_begin})
           AND (EventTime <= {prebracket_end})
       )
       ORDER BY EventTime ASC
@@ -14,6 +16,7 @@ WITH offsignals AS (
   a AS (
       SELECT
           Value,
+          Signal,
           EventTime,
           ROW_NUMBER() OVER(ORDER BY EventTime) AS RN
       FROM
@@ -31,7 +34,8 @@ WITH offsignals AS (
       ON
           a2.RN = a1.RN - 1
       WHERE
-          (a1.Value != a2.Value) OR (a2.RN IS NULL)
+          (a1.Signal = "{signal}")
+          AND ((a1.Value != a2.Value) OR (a2.RN IS NULL))
   )
   SELECT
       b1.VehicleID AS VehicleID,
@@ -46,7 +50,8 @@ WITH offsignals AS (
   ON
       b2.RN = b1.RN + 1
   WHERE
-      b1.Value = {value}
+      b1.Value = "{value}"
   ORDER BY
       b1.EventTime
   {order}
+  

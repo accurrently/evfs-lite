@@ -5,6 +5,9 @@ import re, json, datetime, os, hashlib
 from pathlib import Path
 import settings
 from schemas import RawEvents, DATASET_NAME_NOPROJECT, DATASET_NAME
+from schemas import EngineRunStatus, EngineSpeed, EVBQT, Longitude, ElectricRange
+from schemas import Latitude, IgnitionRunStatus, Odometer, FuelSinceRestart
+from schemas import FuelSinceRestart
 from xcstorage import get_vehicle_folders, move_xcfiles, get_xc_files
 from google.cloud import bigquery
 
@@ -81,8 +84,8 @@ def make_ignition_status(element):
             'Value': is_on
         }
 
-def make_boolean(element, signal, true_vals = [], false_vals = [], default = False):
-    if element['Signal'] == signal:
+def make_boolean(element, signals, true_vals = {}, false_vals = {}, default = False):
+    if element['Signal'] in signals:
         val = default
         if element['Value'] in false_vals:
             val = False
@@ -94,24 +97,41 @@ def make_boolean(element, signal, true_vals = [], false_vals = [], default = Fal
             'Value': val
         }
 
-def make_float(element, signal):
-    if element['Signal'] == signal:
-        return {
-            'VehicleID': element['VehicleID'],
-            'EventTime': element['EventTime'],
-            'Value': float(element['Value'])
-        }
+def make_float(element, signals):
+    if element['Signal'] in signals:
+        try:
+            val = float(element['Value'])
+            return {
+                'VehicleID': element['VehicleID'],
+                'EventTime': element['EventTime'],
+                'Value': val
+                }
+        except:
+            return
 
-def make_int(element, signal):
-    if element['Signal'] == signal:
-        return {
-            'VehicleID': element['VehicleID'],
-            'EventTime': element['EventTime'],
-            'Value': int(element['Value'])
-        }
+def make_str(element, signals):
+    if element['Signal'] in signals:
+        try:
+            val = element['Value']
+            return {
+                'VehicleID': element['VehicleID'],
+                'EventTime': element['EventTime'],
+                'Value': val
+                }
+        except:
+            return
 
-
-
+def make_int(element, signals):
+    if element['Signal'] in signals:
+        try:
+            val = int(element['Value'])
+            return {
+                'VehicleID': element['VehicleID'],
+                'EventTime': element['EventTime'],
+                'Value': val
+                }
+        except:
+            return
 
 
 def run(argv=None):
@@ -142,6 +162,7 @@ def run(argv=None):
 
     for folder in vehicle_folders:
 
+        # Set up options for Apache Beam
         opts = PipelineOptions(flags=argv)
         gopts = opts.view_as(GoogleCloudOptions)
        # gopts.runner = 'DataflowRunner'
@@ -151,17 +172,101 @@ def run(argv=None):
         gopts.job_name = 'openxc-processing-' + folder['vehicle_id'] + '-' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         opts.view_as(StandardOptions).runner = known_args.runner
 
+        # Initialize Beam object
         p = beam.Pipeline(options=opts)
 
+        # Read rows from XC Files
         xcrows = p | "Open XC Files " >> ReadFromText(folder['path'])
 
-        lines = xcrows | "Map raw Event rows for BQ" >> beam.Map(make_record, folder['vehicle_id'])
+        # Reformat XC File rows into objects we like better
+        xcevents = xcrows | "Map raw Event rows" >> beam.Map(make_record, folder['vehicle_id'])
 
-        lines | "Output data to BigQuery" >> beam.io.Write(beam.io.BigQuerySink(
-                                                RawEvents.full_table_name,
-                                                schema=RawEvents.schema,
-                                                create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
-                                                write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+        # Pull out the Odometer signals and write them to their own table
+        xcevents    | "Find odometer readings" >> beam.Map(make_float, Odometer.signal_strings)
+                    | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
+                        Odometer.full_table_name,
+                        schema = Odometer.schema,
+                        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
+                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+
+        # Pull out Engine Run Status signals and write them to their own table
+        xcevents    | "Find Engine Run Status readings" >> beam.Map(
+                        make_boolean,
+                        EngineRunStatus.signal_strings,
+                        true_vals = {'engine_running', 'engine_start', ' engine_run_CSER' },
+                        false_vals = {'off', 'engine_disabled'})
+                    | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
+                        EngineRunStatus.full_table_name,
+                        schema = EngineRunStatus.schema,
+                        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
+                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+
+        # Pull out Engine Speed signals and write them to their own table
+        xcevents    | "Find Engine Speed readings" >> beam.Map(
+                        make_float,
+                        EngineSpeed.signal_strings)
+                    | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
+                        EngineSpeed.full_table_name,
+                        schema = EngineSpeed.schema,
+                        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
+                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+
+        # Pull out Ignition signals and write them to their own table
+        xcevents    | "Find Ignition Status readings" >> beam.Map(
+                        make_boolean,
+                        IgnitionRunStatus.signal_strings,
+                        true_vals = {'run', 'start'},
+                        false_vals = {'off', 'acccessory'})
+                    | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
+                        IgnitionRunStatus.full_table_name,
+                        schema = IgnitionRunStatus.schema,
+                        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
+                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+
+        # Pull out Latitude and Longitude signals and write them to their own table
+        xcevents    | "Find Latitude signals" >> beam.Map(
+                        make_float,
+                        Latitude.signal_strings)
+                    | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
+                        Latitude.full_table_name,
+                        schema = Latitude.schema,
+                        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
+                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+
+        xcevents    | "Find Longitude signals" >> beam.Map(
+                        make_float,
+                        Longitude.signal_strings)
+                    | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
+                        Longitude.full_table_name,
+                        schema = Longitude.schema,
+                        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
+                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+
+        # Get remaining EV range
+        xcevents    | "Find EV range" >> beam.Map(
+                        make_float,
+                        ElectricRange.signal_strings)
+                    | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
+                        ElectricRange.full_table_name,
+                        schema = ElectricRange.schema,
+                        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
+                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+
+        # Get fuel used since restart
+        xcevents    | "Fuel used since restart" >> beam.Map(
+                        make_float,
+                        FuelSinceRestart.signal_strings)
+                    | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
+                        FuelSinceRestart.full_table_name,
+                        schema = FuelSinceRestart.schema,
+                        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
+                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+
+        #lines | "Output data to BigQuery" >> beam.io.Write(beam.io.BigQuerySink(
+        #                                        RawEvents.full_table_name,
+        #                                        schema=RawEvents.schema,
+        #                                        create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
+        #                                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
 
         result = p.run()
         result.wait_until_finish()

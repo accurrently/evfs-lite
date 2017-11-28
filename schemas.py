@@ -1,4 +1,5 @@
 import datetime
+import json
 import settings
 from apache_beam.io.gcp.internal.clients import bigquery
 
@@ -18,16 +19,17 @@ def bq_table(table_dict_array):
         tbl.fields.append(fs)
     return tbl
 
+def load_json_list(signal_name):
+    return json.load(open("signalfiles/{sig}.json".format(sig=signal_name)))
+
 class EVBQT:
     """
     EV Big Query Table base class
     """
     schema = bigquery.TableSchema()
     table_name = 'None'
-
     full_table_name = DATASET_NAME + '.' + table_name
-
-
+    signal_strings = {}
 
 
 class RawEvents(EVBQT):
@@ -44,10 +46,37 @@ class RawEvents(EVBQT):
         {'name': 'Value', 'type': 'string'}
     ])
 
+class IgnitionRunStatus(EVBQT):
+    """
+    Ignition (vehicle power) status signal table.
+    Value will be True for ignition status set to "run", and False for "off".
+    """
+    table_name = 'IgnitionRunStatus'
+    full_table_name = DATASET_NAME + '.' table_name
+    schema = bq_table([
+        {'name': 'VehicleID', 'type': 'string'},
+        {'name': 'EventTime', 'type': 'timestamp'},
+        {'name': 'Value', 'type': 'boolean'}
+    ])
+    signal_strings = load_json_list('IgnitionRunStatus')
+
+class ElectricRange(EVBQT):
+    """
+    Remaining all-electric range of the vehicle
+    """
+    table_name = 'ElectricRange'
+    full_table_name = DATASET_NAME + '.' table_name
+    schema = bq_table([
+        {'name': 'VehicleID', 'type': 'string'},
+        {'name': 'EventTime', 'type': 'timestamp'},
+        {'name': 'Value', 'type': 'float'}
+    ])
+    signal_strings = load_json_list('ElectricRange')
+
 class EngineRunStatus(EVBQT):
     """
-    Engine status signal table. Value will be True for ignition status set to "run",
-    and False for "off".
+    Engine (ICE) status signal table.
+    Value will be True for ignition status set to "run", and False for "off".
     """
     table_name = 'EngineRunStatus'
     full_table_name = DATASET_NAME + '.' table_name
@@ -56,6 +85,20 @@ class EngineRunStatus(EVBQT):
         {'name': 'EventTime', 'type': 'timestamp'},
         {'name': 'Value', 'type': 'boolean'}
     ])
+    signal_strings = load_json_list('EngineRunStatus')
+
+class EngineSpeed(EVBQT):
+    """
+    Engine speed reading in RPM.
+    """
+    table_name = 'EngineSpeed'
+    full_table_name = DATASET_NAME + '.' table_name
+    schema = bq_table([
+        {'name': 'VehicleID', 'type': 'string'},
+        {'name': 'EventTime', 'type': 'timestamp'},
+        {'name': 'Value', 'type': 'float'}
+    ])
+    signal_strings = load_json_list('EngineSpeed')
 
 class Odometer(EVBQT):
     """
@@ -68,6 +111,33 @@ class Odometer(EVBQT):
         {'name': 'EventTime', 'type': 'timestamp'},
         {'name': 'Value', 'type': 'float'}
     ])
+    signal_strings = load_json_list('Odometer')
+
+class Latitude(EVBQT):
+    """
+    Latitude in degrees
+    """
+    table_name = "Latitude"
+    full_table_name = DATASET_NAME + '.' table_name
+    schema = bq_table([
+        {'name': 'VehicleID', 'type': 'string'},
+        {'name': 'EventTime', 'type': 'timestamp'},
+        {'name': 'Value', 'type': 'float'}
+    ])
+    signal_strings = load_json_list('Latitude')
+
+class Longitude(EVBQT):
+    """
+    Longitude in degrees
+    """
+    table_name = "Longitude"
+    full_table_name = DATASET_NAME + '.' table_name
+    schema = bq_table([
+        {'name': 'VehicleID', 'type': 'string'},
+        {'name': 'EventTime', 'type': 'timestamp'},
+        {'name': 'Value', 'type': 'float'}
+    ])
+    signal_strings = load_json_list('Longitude')
 
 class FuelSinceRestart(EVBQT):
     """
@@ -80,6 +150,7 @@ class FuelSinceRestart(EVBQT):
         {'name': 'EventTime', 'type': 'timestamp'},
         {'name': 'Value', 'type': 'float'}
     ])
+    signal_strings = load_json_list('FuelSinceRestart')
 
 class Trips(EVBQT):
     """
@@ -98,6 +169,7 @@ class Trips(EVBQT):
         {'name': 'FuelDistance', 'type': 'float'},
         {'name': 'FuelUsed', 'type': 'float'},
     ])
+
 
 class Stops(EVBQT):
     """

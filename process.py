@@ -14,12 +14,53 @@ from apache_beam.options.pipeline_options import SetupOptions
 from apache_beam.options.pipeline_options import StandardOptions
 from google.cloud import storage
 
+################################################################################
+# Load up SQL strings
+################################################################################
+class SQLSTR:
+    """
+    A simple class to hold all the sql strings we might need for the functions.
+    This is to load the strings into variables before they are dispached to
+    workers, since workers may nt have local access to the .sql files.
+    """
+    # Bracketing querry for finding events within a certain time
+    BRACKETS_RAW = settings.load_sql('brackets.sql')
+    BRACKETS = settings.load_sql('brackets.sql')
 
-def get_bracket_query_str(vehicle, signal, value, order='ASC',
+# January 1, 2000
+DEFAULT_DATETIME_START = datetime.datetime(2000, 1, 1, 0, 00)
+# Now
+DEFAULT_DATETIME_END = datetime.now()
+
+def old_get_bracket_raw_query_str(vehicle, signal, value, order='ASC',
                             prebracket_begin = 0, prebracket_end = time.time() ):
-    return settings.load_sql('brackets.sql').format(
+    return SQLSTR.BRACKETS.format(
         table_name=RawEvents.full_table_name,
         signal=signal,
+        value=value,
+        order=order,
+        prebracket_begin=prebracket_begin,
+        prebracket_end=prebracket_end
+    )
+
+def get_bracket_query_str(vehicle_id, table_class, value, order='ASC',
+        prebracket_begin = DEFAULT_DATETIME_START, prebracket_end = DEFAULT_DATETIME_END):
+    val = value
+    if isinstance(value, str):
+        val = value.translate(None, "\"\'")
+        newval = "\"{v}\"".format(v=val)
+    return SQLSTR.BRACKETS.format(
+        table_name = table_class.full_table_name,
+        value = val,
+        order = order,
+        prebracket_begin = prebracket_begin,
+        prebracket_end = prebracket_end
+    )
+
+def old_get_bracket_query_str(vehicle, signal, value, order='ASC',
+                            prebracket_begin = 0, prebracket_end = time.time() ):
+    return SQLSTR.BRACKETS.format(
+        table_name=RawEvents.full_table_name,
         value=value,
         order=order,
         prebracket_begin=prebracket_begin,
