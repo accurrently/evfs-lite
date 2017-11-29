@@ -1,6 +1,8 @@
 from google.cloud import bigquery
 import settings
 from schemas import RawEvents, FleetDailyStats, GPSTrace, Stops, Trips, DATASET_NAME
+from schemas import ElectricRange, EngineSpeed, EngineRunStatus, IgnitionRunStatus
+from schemas import Latitude, Longitude, FuelSinceRestart, Odometer
 import statistics, uuid, logging, datetime, time
 
 import apache_beam as beam
@@ -26,22 +28,13 @@ class SQLSTR:
     # Bracketing querry for finding events within a certain time
     BRACKETS_RAW = settings.load_sql('brackets.sql')
     BRACKETS = settings.load_sql('brackets.sql')
+    BRACKETED_SIGNALS = settings.load_sql('bracketed_signals.sql')
+    TRIP_DISTANCE = settings.load_sql('trip_distance.sql')
 
 # January 1, 2000
 DEFAULT_DATETIME_START = datetime.datetime(2000, 1, 1, 0, 00)
 # Now
 DEFAULT_DATETIME_END = datetime.now()
-
-def old_get_bracket_raw_query_str(vehicle, signal, value, order='ASC',
-                            prebracket_begin = 0, prebracket_end = time.time() ):
-    return SQLSTR.BRACKETS.format(
-        table_name=RawEvents.full_table_name,
-        signal=signal,
-        value=value,
-        order=order,
-        prebracket_begin=prebracket_begin,
-        prebracket_end=prebracket_end
-    )
 
 def get_bracket_query_str(vehicle_id, table_class, value, order='ASC',
         prebracket_begin = DEFAULT_DATETIME_START, prebracket_end = DEFAULT_DATETIME_END):
@@ -55,6 +48,16 @@ def get_bracket_query_str(vehicle_id, table_class, value, order='ASC',
         order = order,
         prebracket_begin = prebracket_begin,
         prebracket_end = prebracket_end
+    )
+
+def get_bracketed_signals_query_str(vehicle_id, signal_class, order = 'ASC',
+        bracket_begin = DEFAULT_DATETIME_START, bracket_end = DEFAULT_DATETIME_END):
+    return SQLSTR.BRACKETED_SIGNALS.format(
+        table_name = signal_class.full_table_name,
+        vehicle_id = vehicle_id,
+        begin_bracket = bracket_begin,
+        end_bracket = bracket_end,
+        order = order
     )
 
 def old_get_bracket_query_str(vehicle, signal, value, order='ASC',
@@ -90,16 +93,14 @@ def run_async_query(query):
 # Trips
 ################################################################################
 
-def trip_distance(vehicle_id, trip_begin, trip_end, odometer_signal='odometer'):
+def trip_distance(vehicle_id, trip_begin = DEFAULT_DATETIME_START, trip_end = DEFAULT_DATETIME_END):
     """
     Returns the distance traveled (by odometer) for a trip.
     """
-    q = settings.load_sql('trip_distance.sql').format(
-        the_table=RawEvents.full_table_name,
-        begin_bracket=trip_begin,
-        vehicle_id=vehicle_id,
-        end_bracket=trip_end,
-        odometer=odometer_signal
+    q = SQLSTR.TRIP_DISTANCE.format(
+        table_name = Odometer.full_table_name,
+        vehicle_id = vehicle_id,
+        
     )
     client = bigquery.Client()
     job = client.run_async_query(str(uuid.uuid4()), q)
@@ -113,50 +114,22 @@ def trip_distance(vehicle_id, trip_begin, trip_end, odometer_signal='odometer'):
         dist = row['Distance']
     return dist
 
-def trip_engine_starts(vehicle_id, trip_begin, trip_end, engine_signal='engine_start'):
+def trip_engine_starts(vehicle_id, trip_begin, trip_end):
     """
     Get the number of times the engine starts during the trip.
     """
-    q ="""
-    SELECT
-        Value,
-        EventTime
-    FROM
-        {table_name}
-    WHERE (
-        (EventTime >= {begin_bracket})
-        AND (EventTime <= {end_bracket})
-        AND (VehicleID = "{vehicle_id}")
-        AND (Signal = "{engine_signal}")
-    )
-    ORDER BY
-        EventTime
-    ASC
-    """.format(
-        vehicle_id = vehicle_id,
-        begin_bracket=trip_begin,
-        end_bracket=trip_end,
-        engine_signal=engine_signal,
-        table_name=RawEvents.full_table_name
-    )
-
-    client = bigquery.Client()
-    job = client.run_async_query(str(uuid.uuid4()), q)
-    job.begin()
-    job.result()
-    destination_table = job.destination
-    destination_table.reload()
-    rows = destination_table.fetch_data()
+    q = get_bracketed_signals_query_str(vehicle_id, EngineRunStatus, bracket_begin = trip_begin, bracket_end = trip_end)
+    rows = run_async_query(q)
     engine_running = False
     start_count = 0
     for row in rows:
         # Detect engine running as a start
-        if row['Value'] == 'running':
+        if row['Value']:
             if not engine_running:
                 start_count += 1
                 engine_running = True
         # Reset engine detector once it turns off
-        elif row['Value'] == 'off':
+    elif row['Value'] == False:
             if engine_running:
                 engine_running = False
 

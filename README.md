@@ -35,6 +35,12 @@ While Google Dataflow is the primary statistical analysis engine, Dataflow is si
 Because Beam can be installed on any server and use Spark as a backend,
 it is feasible that the code could be agnostic enough for any platform (e.g. AWS, a homebrew server farm, etc.).
 Google Cloud Platform is the main target for now due to the ease of resource allocation.
-Google's Cloud Platform was also chosen because BigQuery is a convenient way to store and query very large datasets that might otherwise quickly impact the performance of a MySQL or Postgres seOrver.
+Google's Cloud Platform was also chosen because BigQuery is a convenient way to store and query very large data sets that might otherwise quickly impact the performance of a MySQL or Postgres server.
 Some signals from the vehicles in question poll at a rate of up to 10ms. This may happen for up to 20 different signals.
 As a result, the signal events from even one vehicle can very quickly scale to millions or billions of records, requiring the need for a big data storage solution.
+
+## ToDo
+There are still plenty of things that need to be done. Those tasks include:
+* Establishing what other signals should be evaluated
+* Writing beam pipelines for Trips and aggregation (data summary)
+* Working on visualization tools
