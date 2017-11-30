@@ -1,5 +1,5 @@
 SELECT
-    MAX(FLOAT(Value)) - MIN(FLOAT(Value)) AS Delta,
+    MAX(FLOAT(Value)) - MIN(FLOAT(Value)) AS Result,
 FROM
     {table_name}
 WHERE (
