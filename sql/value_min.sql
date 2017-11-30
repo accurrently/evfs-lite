@@ -1,5 +1,5 @@
 SELECT
-    MAX(FLOAT(Value)) - MIN(FLOAT(Value)) AS Distance,
+    MIN(FLOAT(Value)) AS Min,
 FROM
     {table_name}
 WHERE (

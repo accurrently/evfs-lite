@@ -1,4 +1,5 @@
 import datetime
+from enum import Enum
 import json
 import settings
 from apache_beam.io.gcp.internal.clients import bigquery
@@ -22,6 +23,13 @@ def bq_table(table_dict_array):
 def load_json_list(signal_name):
     return json.load(open("signalfiles/{sig}.json".format(sig=signal_name)))
 
+class ValueType(Enum):
+    None = 0
+    Bool = 1
+    Number = 2
+    String = 3
+    Multiple = 4
+
 class EVBQT:
     """
     EV Big Query Table base class
@@ -30,6 +38,8 @@ class EVBQT:
     table_name = 'None'
     full_table_name = DATASET_NAME + '.' + table_name
     signal_strings = {}
+    value_type = ValueType.None
+
 
 
 class RawEvents(EVBQT):
@@ -45,6 +55,7 @@ class RawEvents(EVBQT):
         {'name': 'Signal', 'type': 'string'},
         {'name': 'Value', 'type': 'string'}
     ])
+    value_type = ValueType.String
 
 class IgnitionRunStatus(EVBQT):
     """
@@ -59,6 +70,7 @@ class IgnitionRunStatus(EVBQT):
         {'name': 'Value', 'type': 'boolean'}
     ])
     signal_strings = load_json_list('IgnitionRunStatus')
+    value_type = ValueType.Bool
 
 class ElectricRange(EVBQT):
     """
@@ -72,6 +84,7 @@ class ElectricRange(EVBQT):
         {'name': 'Value', 'type': 'float'}
     ])
     signal_strings = load_json_list('ElectricRange')
+    value_type = ValueType.Number
 
 class EngineRunStatus(EVBQT):
     """
@@ -86,6 +99,7 @@ class EngineRunStatus(EVBQT):
         {'name': 'Value', 'type': 'boolean'}
     ])
     signal_strings = load_json_list('EngineRunStatus')
+    value_type = ValueType.Bool
 
 class EngineSpeed(EVBQT):
     """
@@ -99,6 +113,7 @@ class EngineSpeed(EVBQT):
         {'name': 'Value', 'type': 'float'}
     ])
     signal_strings = load_json_list('EngineSpeed')
+    value_type = ValueType.Number
 
 class Odometer(EVBQT):
     """
@@ -112,6 +127,7 @@ class Odometer(EVBQT):
         {'name': 'Value', 'type': 'float'}
     ])
     signal_strings = load_json_list('Odometer')
+    value_type = ValueType.Number
 
 class Latitude(EVBQT):
     """
@@ -125,6 +141,7 @@ class Latitude(EVBQT):
         {'name': 'Value', 'type': 'float'}
     ])
     signal_strings = load_json_list('Latitude')
+    value_type = ValueType.Number
 
 class Longitude(EVBQT):
     """
@@ -138,6 +155,7 @@ class Longitude(EVBQT):
         {'name': 'Value', 'type': 'float'}
     ])
     signal_strings = load_json_list('Longitude')
+    value_type = ValueType.Number
 
 class FuelSinceRestart(EVBQT):
     """
@@ -151,6 +169,7 @@ class FuelSinceRestart(EVBQT):
         {'name': 'Value', 'type': 'float'}
     ])
     signal_strings = load_json_list('FuelSinceRestart')
+    value_type = ValueType.Number
 
 class Trips(EVBQT):
     """
@@ -169,6 +188,7 @@ class Trips(EVBQT):
         {'name': 'FuelDistance', 'type': 'float'},
         {'name': 'FuelUsed', 'type': 'float'},
     ])
+    value_type = ValueType.Multiple
 
 
 class Stops(EVBQT):
@@ -203,6 +223,7 @@ class GPSTrace(EVBQT):
         {'name': 'Latitude', 'type': 'float'},
         {'name': 'Longitude', 'type': 'float'},
     ])
+    value_type = ValueType.Multiple
 
 class FleetDailyStats(EVBQT):
     """

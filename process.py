@@ -1,5 +1,6 @@
 from google.cloud import bigquery
 import settings
+from schemas import ValueType
 from schemas import RawEvents, FleetDailyStats, GPSTrace, Stops, Trips, DATASET_NAME
 from schemas import ElectricRange, EngineSpeed, EngineRunStatus, IgnitionRunStatus
 from schemas import Latitude, Longitude, FuelSinceRestart, Odometer
@@ -26,10 +27,27 @@ class SQLSTR:
     workers, since workers may nt have local access to the .sql files.
     """
     # Bracketing querry for finding events within a certain time
-    BRACKETS_RAW = settings.load_sql('brackets.sql')
+    BRACKETS_RAW = settings.load_sql('brackets_raw.sql')
     BRACKETS = settings.load_sql('brackets.sql')
-    BRACKETED_SIGNALS = settings.load_sql('bracketed_signals.sql')
-    TRIP_DISTANCE = settings.load_sql('trip_distance.sql')
+    # Returns all the signals of a given type
+    SIGNALS = settings.load_sql('signals.sql')
+    # Returns signals averaged over a specific time interval
+    SIGNALS_INTERVAL_AVG = settings.load_sql('signals_interval_avg.sql')
+
+    # Gets the difference between the min and max of the values in the sample
+    VALUE_DELTA = settings.load_sql('value_delta.sql')
+    # Returns the maximum value of a sample
+    VALUE_MAX = settings.load_sql('value_max.sql')
+    # Returns the minimum value of a sample
+    VALUE_MIN = settings.load_sql('value_min.sql')
+    # Returns the Minimum, Maximum, Average, standard deviation (sample and pop)
+    VALUE_STATS = settings.load_sql('value_stats.sql')
+    # Returns a specific statistic function (for speed)
+    VALUE_STAT_FUNC = settings.load_sql('value_stat_func.sql')
+
+    # Get a GPS trace for a vehicle
+    GPS_TRACE = settings.load_sql('gps_trace.sql')
+
 
 # January 1, 2000
 DEFAULT_DATETIME_START = datetime.datetime(2000, 1, 1, 0, 00)
@@ -50,9 +68,9 @@ def get_bracket_query_str(vehicle_id, table_class, value, order='ASC',
         prebracket_end = prebracket_end
     )
 
-def get_bracketed_signals_query_str(vehicle_id, signal_class, order = 'ASC',
+def get_signals_query_str(vehicle_id, signal_class, order = 'ASC',
         bracket_begin = DEFAULT_DATETIME_START, bracket_end = DEFAULT_DATETIME_END):
-    return SQLSTR.BRACKETED_SIGNALS.format(
+    return SQLSTR.SIGNALS.format(
         table_name = signal_class.full_table_name,
         vehicle_id = vehicle_id,
         begin_bracket = bracket_begin,
@@ -60,25 +78,47 @@ def get_bracketed_signals_query_str(vehicle_id, signal_class, order = 'ASC',
         order = order
     )
 
-def old_get_bracket_query_str(vehicle, signal, value, order='ASC',
-                            prebracket_begin = 0, prebracket_end = time.time() ):
-    return SQLSTR.BRACKETS.format(
-        table_name=RawEvents.full_table_name,
-        value=value,
-        order=order,
-        prebracket_begin=prebracket_begin,
-        prebracket_end=prebracket_end
+def value_statfunc_query_str(vehicle_id, signal_class, function_name,
+        bracket_begin = DEFAULT_DATETIME_START, bracket_end = DEFAULT_DATETIME_END):
+    allowed_functions = {
+        "AVG" : SQLSTR.VALUE_STAT_FUNC,
+        "MIN" : SQLSTR.VALUE_STAT_FUNC,
+        "MAX" : SQLSTR.VALUE_STAT_FUNC,
+        "SUM" : SQLSTR.VALUE_STAT_FUNC,
+        "VAR_SAMP" : SQLSTR.VALUE_STAT_FUNC,
+        "VAR_POP" : SQLSTR.VALUE_STAT_FUNC,
+        "STDDEV_POP" : SQLSTR.VALUE_STAT_FUNC,
+        "STDDEV_SAMP" : SQLSTR.VALUE_STAT_FUNC,
+        "COUNT" : SQLSTR.VALUE_STAT_FUNC,
+        "DELTA" : SQLSTR.VALUE_DELTA,
+    }
+    if signal_class.value_type == ValueType.Number:
+        if function_name in allowed_functions:
+            return allowed_functions[function_name].format(
+                table_name = signal_class.full_table_name,
+                vehicle_id = vehicle_id,
+                func = function_name,
+                begin_bracket = bracket_begin,
+                end_bracket = bracket_end,
+            )
+    return None
+
+def get_gps_trace_query_str(vehicle_id, interval_sec = 60
+    latitude_class = Latitude, longitude_class = Longitude,
+    bracket_begin = DEFAULT_DATETIME_START, bracket_end = DEFAULT_DATETIME_END):
+    """
+    This function will return a SQL query string that will look for GPS coordinates
+    averaged over the interval time in seconds given in interval_sec.
+    """
+    return SQLSTR.GPS_TRACE.format(
+        vehicle_id = vehicle_id,
+        interval = interval_sec,
+        lat_table = latitude_class.full_table_name,
+        lon_table = longitude_class.full_table_name,
+        begin_bracket = bracket_begin,
+        end_bracket = bracket_end    
     )
 
-def get_bracket_query(vehicle, signal, value, order='ASC'):
-    q = get_bracket_query_str(vehicle, signal, value, order)
-    client = bigquery.Client()
-    job = client.run_async_query(str(uuid.uuid4()), q)
-    job.begin()
-    job.result()
-    destination_table = job.destination
-    destination_table.reload()
-    return destination_table.fetch_data()
 
 def run_async_query(query):
     client = bigquery.Client()
@@ -100,15 +140,10 @@ def trip_distance(vehicle_id, trip_begin = DEFAULT_DATETIME_START, trip_end = DE
     q = SQLSTR.TRIP_DISTANCE.format(
         table_name = Odometer.full_table_name,
         vehicle_id = vehicle_id,
-        
+        begin_bracket = trip_begin,
+        end_bracket = trip_end
     )
-    client = bigquery.Client()
-    job = client.run_async_query(str(uuid.uuid4()), q)
-    job.begin()
-    job.result()
-    destination_table = job.destination
-    destination_table.reload()
-    rows = destination_table.fetch_data()
+    rows = run_async_query(q)
     dist = 0
     for row in rows:
         dist = row['Distance']
@@ -118,7 +153,7 @@ def trip_engine_starts(vehicle_id, trip_begin, trip_end):
     """
     Get the number of times the engine starts during the trip.
     """
-    q = get_bracketed_signals_query_str(vehicle_id, EngineRunStatus, bracket_begin = trip_begin, bracket_end = trip_end)
+    q = get_signals_query_str(vehicle_id, EngineRunStatus, bracket_begin = trip_begin, bracket_end = trip_end)
     rows = run_async_query(q)
     engine_running = False
     start_count = 0
