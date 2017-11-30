@@ -182,19 +182,19 @@ def run(argv=None):
         xcevents = xcrows | "Map raw Event rows" >> beam.Map(make_record, folder['vehicle_id'])
 
         # Pull out the Odometer signals and write them to their own table
-        xcevents    | "Find odometer readings" >> beam.Map(make_float, Odometer.signal_strings)
+        xcevents    | "Find odometer readings" >> beam.Map(make_float, Odometer.signal_strings) \
                     | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
-                        Odometer.full_table_name,
-                        schema = Odometer.schema,
-                        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
-                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+                                    Odometer.full_table_name,
+                                    schema = Odometer.schema,
+                                    create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
+                                    write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
 
         # Pull out Engine Run Status signals and write them to their own table
         xcevents    | "Find Engine Run Status readings" >> beam.Map(
                         make_boolean,
                         EngineRunStatus.signal_strings,
                         true_vals = {'engine_running', 'engine_start', ' engine_run_CSER' },
-                        false_vals = {'off', 'engine_disabled'})
+                        false_vals = {'off', 'engine_disabled'}) \
                     | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
                         EngineRunStatus.full_table_name,
                         schema = EngineRunStatus.schema,
@@ -204,7 +204,7 @@ def run(argv=None):
         # Pull out Engine Speed signals and write them to their own table
         xcevents    | "Find Engine Speed readings" >> beam.Map(
                         make_float,
-                        EngineSpeed.signal_strings)
+                        EngineSpeed.signal_strings) \
                     | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
                         EngineSpeed.full_table_name,
                         schema = EngineSpeed.schema,
@@ -216,7 +216,7 @@ def run(argv=None):
                         make_boolean,
                         IgnitionRunStatus.signal_strings,
                         true_vals = {'run', 'start'},
-                        false_vals = {'off', 'acccessory'})
+                        false_vals = {'off', 'acccessory'}) \
                     | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
                         IgnitionRunStatus.full_table_name,
                         schema = IgnitionRunStatus.schema,
@@ -226,7 +226,7 @@ def run(argv=None):
         # Pull out Latitude and Longitude signals and write them to their own table
         xcevents    | "Find Latitude signals" >> beam.Map(
                         make_float,
-                        Latitude.signal_strings)
+                        Latitude.signal_strings) \
                     | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
                         Latitude.full_table_name,
                         schema = Latitude.schema,
@@ -235,7 +235,7 @@ def run(argv=None):
 
         xcevents    | "Find Longitude signals" >> beam.Map(
                         make_float,
-                        Longitude.signal_strings)
+                        Longitude.signal_strings) \
                     | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
                         Longitude.full_table_name,
                         schema = Longitude.schema,
@@ -245,7 +245,7 @@ def run(argv=None):
         # Get remaining EV range
         xcevents    | "Find EV range" >> beam.Map(
                         make_float,
-                        ElectricRange.signal_strings)
+                        ElectricRange.signal_strings) \
                     | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
                         ElectricRange.full_table_name,
                         schema = ElectricRange.schema,
@@ -255,7 +255,7 @@ def run(argv=None):
         # Get fuel used since restart
         xcevents    | "Fuel used since restart" >> beam.Map(
                         make_float,
-                        FuelSinceRestart.signal_strings)
+                        FuelSinceRestart.signal_strings) \
                     | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
                         FuelSinceRestart.full_table_name,
                         schema = FuelSinceRestart.schema,
@@ -265,12 +265,12 @@ def run(argv=None):
         # Get vehicle speed information
         xcevents    | "Get vehicle speed" >> beam.Map(
                         make_float,
-                        VehicleSpeed.signal_strings)
+                        VehicleSpeed.signal_strings) \
                     | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
-                        FuelSinceRestart.full_table_name,
-                        schema = VehicleSpeed.schema,
-                        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
-                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+                                    FuelSinceRestart.full_table_name,
+                                    schema = VehicleSpeed.schema,
+                                    create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
+                                    write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
 
         #lines | "Output data to BigQuery" >> beam.io.Write(beam.io.BigQuerySink(
         #                                        RawEvents.full_table_name,

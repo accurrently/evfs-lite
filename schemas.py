@@ -63,7 +63,7 @@ class IgnitionRunStatus(EVBQT):
     Value will be True for ignition status set to "run", and False for "off".
     """
     table_name = 'IgnitionRunStatus'
-    full_table_name = DATASET_NAME + '.' table_name
+    full_table_name = DATASET_NAME + '.' + table_name
     schema = bq_table([
         {'name': 'VehicleID', 'type': 'string'},
         {'name': 'EventTime', 'type': 'timestamp'},
@@ -77,7 +77,7 @@ class ElectricRange(EVBQT):
     Remaining all-electric range of the vehicle
     """
     table_name = 'ElectricRange'
-    full_table_name = DATASET_NAME + '.' table_name
+    full_table_name = DATASET_NAME + '.' + table_name
     schema = bq_table([
         {'name': 'VehicleID', 'type': 'string'},
         {'name': 'EventTime', 'type': 'timestamp'},
@@ -91,7 +91,7 @@ class VehicleSpeed(EVBQT):
     Vehicle speed in km/h
     """
     table_name = 'VehicleSpeed'
-    full_table_name = DATASET_NAME + '.' table_name
+    full_table_name = DATASET_NAME + '.' + table_name
     schema = bq_table([
         {'name': 'VehicleID', 'type': 'string'},
         {'name': 'EventTime', 'type': 'timestamp'},
@@ -106,7 +106,7 @@ class EngineRunStatus(EVBQT):
     Value will be True for ignition status set to "run", and False for "off".
     """
     table_name = 'EngineRunStatus'
-    full_table_name = DATASET_NAME + '.' table_name
+    full_table_name = DATASET_NAME + '.' + table_name
     schema = bq_table([
         {'name': 'VehicleID', 'type': 'string'},
         {'name': 'EventTime', 'type': 'timestamp'},
@@ -120,7 +120,7 @@ class EngineSpeed(EVBQT):
     Engine speed reading in RPM.
     """
     table_name = 'EngineSpeed'
-    full_table_name = DATASET_NAME + '.' table_name
+    full_table_name = DATASET_NAME + '.' + table_name
     schema = bq_table([
         {'name': 'VehicleID', 'type': 'string'},
         {'name': 'EventTime', 'type': 'timestamp'},
@@ -134,7 +134,7 @@ class Odometer(EVBQT):
     Odometer reading in km.
     """
     table_name = 'Odometer'
-    full_table_name = DATASET_NAME + '.' table_name
+    full_table_name = DATASET_NAME + '.' + table_name
     schema = bq_table([
         {'name': 'VehicleID', 'type': 'string'},
         {'name': 'EventTime', 'type': 'timestamp'},
@@ -148,7 +148,7 @@ class Latitude(EVBQT):
     Latitude in degrees
     """
     table_name = "Latitude"
-    full_table_name = DATASET_NAME + '.' table_name
+    full_table_name = DATASET_NAME + '.' + table_name
     schema = bq_table([
         {'name': 'VehicleID', 'type': 'string'},
         {'name': 'EventTime', 'type': 'timestamp'},
@@ -162,7 +162,7 @@ class Longitude(EVBQT):
     Longitude in degrees
     """
     table_name = "Longitude"
-    full_table_name = DATASET_NAME + '.' table_name
+    full_table_name = DATASET_NAME + '.' + table_name
     schema = bq_table([
         {'name': 'VehicleID', 'type': 'string'},
         {'name': 'EventTime', 'type': 'timestamp'},
@@ -176,7 +176,7 @@ class FuelSinceRestart(EVBQT):
     Fuel used since restart in l.
     """
     table_name = 'Odometer'
-    full_table_name = DATASET_NAME + '.' table_name
+    full_table_name = DATASET_NAME + '.' + table_name
     schema = bq_table([
         {'name': 'VehicleID', 'type': 'string'},
         {'name': 'EventTime', 'type': 'timestamp'},
