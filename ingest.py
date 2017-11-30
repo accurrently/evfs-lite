@@ -7,7 +7,7 @@ import settings
 from schemas import RawEvents, DATASET_NAME_NOPROJECT, DATASET_NAME
 from schemas import EngineRunStatus, EngineSpeed, EVBQT, Longitude, ElectricRange
 from schemas import Latitude, IgnitionRunStatus, Odometer, FuelSinceRestart
-from schemas import FuelSinceRestart
+from schemas import VehicleSpeed
 from xcstorage import get_vehicle_folders, move_xcfiles, get_xc_files
 from google.cloud import bigquery
 
@@ -259,6 +259,16 @@ def run(argv=None):
                     | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
                         FuelSinceRestart.full_table_name,
                         schema = FuelSinceRestart.schema,
+                        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
+                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+
+        # Get vehicle speed information
+        xcevents    | "Get vehicle speed" >> beam.Map(
+                        make_float,
+                        VehicleSpeed.signal_strings)
+                    | "Write to table" >> beam.io.Write(beam.io.BigQuerySink(
+                        FuelSinceRestart.full_table_name,
+                        schema = VehicleSpeed.schema,
                         create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
                         write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
 

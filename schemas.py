@@ -86,6 +86,20 @@ class ElectricRange(EVBQT):
     signal_strings = load_json_list('ElectricRange')
     value_type = ValueType.Number
 
+class VehicleSpeed(EVBQT):
+    """
+    Vehicle speed in km/h
+    """
+    table_name = 'VehicleSpeed'
+    full_table_name = DATASET_NAME + '.' table_name
+    schema = bq_table([
+        {'name': 'VehicleID', 'type': 'string'},
+        {'name': 'EventTime', 'type': 'timestamp'},
+        {'name': 'Value', 'type': 'float'}
+    ])
+    signal_strings = load_json_list('VehicleSpeed')
+    value_type = ValueType.Number
+
 class EngineRunStatus(EVBQT):
     """
     Engine (ICE) status signal table.
