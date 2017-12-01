@@ -1,5 +1,8 @@
 {
-  "ignition_status": [
-    "Ford Fusion Energi",
+  "ignition_status" : [
+    {
+      "name" : "Ford Fusion Energi",
+      "type" : "PHEV"
+    }
   ]
 }

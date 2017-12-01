@@ -1,5 +1,8 @@
 {
   "fuel_consumed_since_restart" : [
-    "Ford Fusion Energi"
+    {
+      "name" : "Ford Fusion Energi",
+      "type" : "PHEV"
+    }
   ]
 }

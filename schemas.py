@@ -1,6 +1,6 @@
 import datetime
 from enum import Enum
-import json
+import json, os
 import settings
 from apache_beam.io.gcp.internal.clients import bigquery
 
@@ -21,10 +21,11 @@ def bq_table(table_dict_array):
     return tbl
 
 def load_json_list(signal_name):
-    return json.load(open("signalfiles/{sig}.json".format(sig=signal_name)))
+    fname = "{sig}.json".format(sig=signal_name)
+    return json.load(open(os.path.join('signalfiles', fname)))
 
 class ValueType(Enum):
-    None = 0
+    Null = 0
     Bool = 1
     Number = 2
     String = 3
@@ -35,12 +36,10 @@ class EVBQT:
     EV Big Query Table base class
     """
     schema = bigquery.TableSchema()
-    table_name = 'None'
+    table_name = 'Base'
     full_table_name = DATASET_NAME + '.' + table_name
     signal_strings = {}
-    value_type = ValueType.None
-
-
+    value_type = ValueType.Null
 
 class RawEvents(EVBQT):
     """
@@ -55,6 +54,7 @@ class RawEvents(EVBQT):
         {'name': 'Signal', 'type': 'string'},
         {'name': 'Value', 'type': 'string'}
     ])
+    signal_strings = {}
     value_type = ValueType.String
 
 class IgnitionRunStatus(EVBQT):
@@ -173,9 +173,9 @@ class Longitude(EVBQT):
 
 class FuelSinceRestart(EVBQT):
     """
-    Fuel used since restart in l.
+    Fuel used since restart in microliters.
     """
-    table_name = 'Odometer'
+    table_name = 'FuelSinceRestart'
     full_table_name = DATASET_NAME + '.' + table_name
     schema = bq_table([
         {'name': 'VehicleID', 'type': 'string'},

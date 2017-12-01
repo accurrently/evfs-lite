@@ -1,5 +1,8 @@
 {
   "remaining_ev_range" : [
-    "Ford Fusion Energi"
+    {
+      "name" : "Ford Fusion Energi",
+      "type" : "PHEV"
+    }
   ]
 }

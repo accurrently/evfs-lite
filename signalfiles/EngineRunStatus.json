@@ -1,5 +1,8 @@
 {
   "engine_start" : [
-    "Ford Fusion Energi"
+    {
+      "name" : "Ford Fusion Energi",
+      "type" : "PHEV"
+    }
   ]
 }

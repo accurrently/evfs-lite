@@ -1,5 +1,8 @@
 {
   "longitude" : [
-    "Ford Fusion Energi"
+    {
+      "name" : "Ford Fusion Energi",
+      "type" : "PHEV"
+    }
   ]
 }
