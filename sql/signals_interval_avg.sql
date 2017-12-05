@@ -7,8 +7,7 @@ WITH sigs AS (
     {table_name}
   WHERE
     VehicleID = "{vehicle_id}"
-    AND EventTime >= {begin_bracket}
-    AND EventTime <= {end_bracket}
+    AND {time_bracket}
   GROUP BY
     EventMinute
   ORDER BY

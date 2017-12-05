@@ -54,6 +54,21 @@ DEFAULT_DATETIME_START = datetime.datetime(2000, 1, 1, 0, 00)
 # Now
 DEFAULT_DATETIME_END = datetime.now()
 
+def datetime_to_float(d):
+    if isinstance(d,int) or isinstance(d,float):
+        return d
+    epoch = datetime.datetime.utcfromtimestamp(0)
+    total_seconds =  (d - epoch).total_seconds()
+    # total_seconds will be in decimals (millisecond precision)
+    return total_seconds
+
+def time_bracket_str(begin, end):
+    begin_ts = datetime_to_float(begin)
+    end_ts = datetime_to_float(end)
+    q = 'UNIX_SECONDS(EventTime) >= {begin} AND UNIX_SECONDS(EventTime) <= {end}'
+    return q.format(begin=begin_ts, end=end_ts)
+
+
 def get_bracket_query_str(vehicle_id, table_class, value, order='ASC',
         prebracket_begin = DEFAULT_DATETIME_START, prebracket_end = DEFAULT_DATETIME_END):
     val = value
@@ -73,8 +88,7 @@ def get_signals_query_str(vehicle_id, signal_class, order = 'ASC',
     return SQLSTR.SIGNALS.format(
         table_name = signal_class.full_table_name,
         vehicle_id = vehicle_id,
-        begin_bracket = bracket_begin,
-        end_bracket = bracket_end,
+        time_bracket = time_bracket_str(bracket_begin, bracket_end)
         order = order
     )
 
@@ -85,8 +99,7 @@ def get_signals_interval_avg_query_str(vehicle_id, signal_class, interval_sec = 
             table_name = signal_class.full_table_name,
             vehicle_id = vehicle_id,
             interval = interval_sec,
-            begin_bracket = bracket_begin,
-            end_bracket = bracket_end
+            time_bracket = time_bracket_str(bracket_begin, bracket_end)
         )
 
 def value_statfunc_query_str(vehicle_id, signal_class, function_name,
@@ -109,8 +122,7 @@ def value_statfunc_query_str(vehicle_id, signal_class, function_name,
                 table_name = signal_class.full_table_name,
                 vehicle_id = vehicle_id,
                 func = function_name,
-                begin_bracket = bracket_begin,
-                end_bracket = bracket_end,
+                time_bracket = time_bracket_str(bracket_begin, bracket_end)
             )
     return None
 
@@ -126,8 +138,7 @@ def get_gps_trace_query_str(vehicle_id, interval_sec = 60
         interval = interval_sec,
         lat_table = latitude_class.full_table_name,
         lon_table = longitude_class.full_table_name,
-        begin_bracket = bracket_begin,
-        end_bracket = bracket_end
+        time_bracket = time_bracket_str(bracket_begin, bracket_end)
     )
 
 def run_async_query(query):
@@ -152,7 +163,7 @@ def trip_distance(vehicle_id, trip_begin = DEFAULT_DATETIME_START, trip_end = DE
     rows = run_async_query(q)
     dist = 0
     for row in rows:
-        dist = row['Value']
+        dist = row['Result']
     return dist
 
 def trip_engine_starts(vehicle_id, trip_begin, trip_end):

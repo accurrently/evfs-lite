@@ -9,8 +9,7 @@ SELECT
 FROM
     {table_name}
 WHERE (
-    (EventTime >= {begin_bracket})
-    AND (EventTime <= {end_bracket})
-    AND (VehicleID = "{vehicle_id}")
+    VehicleID = "{vehicle_id}"
+    AND {time_bracket}
 )
 LIMIT 1

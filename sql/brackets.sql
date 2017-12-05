@@ -47,6 +47,6 @@ WITH offsignals AS (
       b2.RN = b1.RN + 1
   WHERE
       b1.Value = {value}
+      AND b1.VehicleID = "{vehicle_id}"
   ORDER BY
       b1.EventTime
-  {order}

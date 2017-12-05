@@ -7,8 +7,7 @@ WITH lat AS (
     {lat_table}
   WHERE
     VehicleID = "{vehicle_id}"
-    AND EventTime >= {begin_bracket}
-    AND EventTime <= {end_bracket}
+    AND {time_bracket}
   GROUP BY
     EventMinute
   ORDER BY
@@ -24,8 +23,7 @@ lon AS (
     {long_table}
   WHERE
   VehicleID = "{vehicle_id}"
-  AND EventTime >= {begin_bracket}
-  AND EventTime <= {end_bracket}
+  AND {time_bracket}
   GROUP BY
     EventMinute
   ORDER BY
