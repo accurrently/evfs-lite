@@ -171,18 +171,18 @@ class Longitude(EVBQT):
     signal_strings = load_json_list('Longitude')
     value_type = ValueType.Number
 
-class FuelSinceRestart(EVBQT):
+class FuelConsumption(EVBQT):
     """
     Fuel used since restart in microliters.
     """
-    table_name = 'FuelSinceRestart'
+    table_name = 'FuelConsumption'
     full_table_name = DATASET_NAME + '.' + table_name
     schema = bq_table([
-        {'name': 'VehicleID', 'type': 'string'},
+        {'name': 'VehicleID',   'type': 'string'},
         {'name': 'EventTime', 'type': 'timestamp'},
         {'name': 'Value', 'type': 'float'}
     ])
-    signal_strings = load_json_list('FuelSinceRestart')
+    signal_strings = load_json_list('FuelConsumption')
     value_type = ValueType.Number
 
 class Trips(EVBQT):

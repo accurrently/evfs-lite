@@ -275,11 +275,11 @@ def run(argv=None):
         # Get fuel used since restart
         xcevents    | "Fuel used since restart" >> beam.Map(
                         make_float,
-                        FuelSinceRestart.signal_strings) \
+                        FuelConsumption.signal_strings) \
                     | "Filter null Fuel" >> beam.ParDo(FilterNull()) \
-                    | "Write FuelSinceRestart" >> beam.io.Write(beam.io.BigQuerySink(
-                        FuelSinceRestart.full_table_name,
-                        schema = FuelSinceRestart.schema,
+                    | "Write FuelConsumption" >> beam.io.Write(beam.io.BigQuerySink(
+                        FuelConsumption.full_table_name,
+                        schema = FuelConsumption.schema,
                         create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
                         write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
 
