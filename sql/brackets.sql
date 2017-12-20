@@ -50,3 +50,4 @@ WITH offsignals AS (
       AND b1.VehicleID = "{vehicle_id}"
   ORDER BY
       b1.EventTime
+  ASC

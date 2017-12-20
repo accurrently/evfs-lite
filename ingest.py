@@ -4,10 +4,7 @@ import logging
 import re, json, datetime, os, hashlib
 from pathlib import Path
 import settings
-from schemas import RawEvents, DATASET_NAME_NOPROJECT, DATASET_NAME
-from schemas import EngineRunStatus, EngineSpeed, EVBQT, Longitude, ElectricRange
-from schemas import Latitude, IgnitionRunStatus, Odometer, FuelSinceRestart
-from schemas import VehicleSpeed
+from schemas import Events, DATASET_NAME_NOPROJECT, DATASET_NAME
 from xcstorage import get_vehicle_folders, move_xcfiles, get_xc_files
 from google.cloud import bigquery
 
@@ -24,40 +21,10 @@ from google.cloud import storage
 
 from collections import Counter
 
-
-class PrepForBigQuery(beam.DoFn):
-    """
-    Formats data for insertion into BigQuery.
-    """
-
-    def __init__(self, xcfile_id, vehicle_id):
-        self.xcfile_id = xcfile_id
-        self.vehicle_id = vehicle_id
-
-    def process(self, element):
-        import datetime, json
-        j = False
-        try:
-            j = json.loads(element)
-        except:
-            return None
-        if j:
-            ts = float(j['timestamp'])
-            if ts >= 10000000000:
-                ts = ts/1000
-            return {
-                'VehicleID' : self.vehicle_id,
-                'EventTime' : ts,
-                'Signal' : j['name'],
-                'Value' : j['value']
-            }
-        return None
-
 class FilterNull(beam.DoFn):
     """
     Filters out null xcrows
     """
-
     def process(self, element):
         if bool(element):
             yield element
@@ -81,70 +48,32 @@ def make_record(element, vid):
         }
     return {}
 
-def make_ignition_status(element):
-    if element['Signal'] == 'ignition_status':
-        is_on = False
-        if element['Value'] == 'run':
-            is_on = True
-        return {
-            'VehicleID': element['VehicleID'],
-            'EventTime': element['EventTime'],
-            'Value': is_on
-        }
-    return {}
+class SignalFilter(beam.DoFn):
+    """
+    Filters signals from a string
+    """
+    def process(self, element, filtered):
+        el = Events.lookup_by_signal_string(element['Signal'])
+        if el is not None:
+            if el.name == filtered.name:
+                yield element
 
-def make_boolean(element, signals, true_vals = {}, false_vals = {}, default = False):
-    if element['Signal'] in signals:
-        val = default
-        if element['Value'] in false_vals:
-            val = False
-        if element['Value'] in true_vals:
-            val = True
-        return {
-            'VehicleID': element['VehicleID'],
-            'EventTime': element['EventTime'],
-            'Value': val
-        }
-    return {}
+def build_signal(element, signal_class):
+    val = signal_class.convert(element['Value'])
+    return {
+        'VehicleID': element['VehicleID'],
+        'EventTime': element['EventTime'],
+        'Value': val
+    }
 
-def make_float(element, signals):
-    if element['Signal'] in signals:
-        try:
-            val = float(element['Value'])
-            return {
-                'VehicleID': element['VehicleID'],
-                'EventTime': element['EventTime'],
-                'Value': val
-                }
-        except:
-            return {}
-    return {}
-
-def make_str(element, signals):
-    if element['Signal'] in signals:
-        try:
-            val = element['Value']
-            return {
-                'VehicleID': element['VehicleID'],
-                'EventTime': element['EventTime'],
-                'Value': val
-                }
-        except:
-            return {}
-    return {}
-
-def make_int(element, signals):
-    if element['Signal'] in signals:
-        try:
-            val = int(element['Value'])
-            return {
-                'VehicleID': element['VehicleID'],
-                'EventTime': element['EventTime'],
-                'Value': val
-                }
-        except:
-            return {}
-    return {}
+def process_signal(pcoll, signal_class):
+    (pcoll  | "Filter {}.".format(signal_class.name) >> beam.ParDo(SignalFilter(signal_class))
+            | "Build {} events".format(signal_class.name) >> beam.Map(build_signal, signal_class)
+            | "Write {} to BQ.".format(signal_class.name) >> beam.io.Write(beam.io.BigQuerySink(
+                            signal_class.full_table_name(),
+                            schema = signal_class.bq_schema(),
+                            create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
+                            write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE)))
 
 
 def run(argv=None):
@@ -195,110 +124,29 @@ def run(argv=None):
         xcevents = xcrows | "Map raw Event rows" >> beam.Map(make_record, folder['vehicle_id'])
 
         # Pull out the Odometer signals and write them to their own table
-        xcevents    | "Find odometer readings" >> beam.Map(make_float, Odometer.signal_strings) \
-                    | "Filter null Odometer" >> beam.ParDo(FilterNull()) \
-                    | "Write Odometer" >> beam.io.Write(beam.io.BigQuerySink(
-                                    Odometer.full_table_name,
-                                    schema = Odometer.schema,
-                                    create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
-                                    write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+        process_signal(xcevents, Events.Odometer)
 
         # Pull out Engine Run Status signals and write them to their own table
-        xcevents    | "Find Engine Run Status readings" >> beam.Map(
-                        make_boolean,
-                        EngineRunStatus.signal_strings,
-                        true_vals = {'engine_running', 'engine_start', ' engine_run_CSER' },
-                        false_vals = {'off', 'engine_disabled'}) \
-                    | "Filter null EngineRunStatus" >> beam.ParDo(FilterNull()) \
-                    | "Write EngineRunStatus" >> beam.io.Write(beam.io.BigQuerySink(
-                        EngineRunStatus.full_table_name,
-                        schema = EngineRunStatus.schema,
-                        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
-                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+        process_signal(xcevents, Events.EngineStatus)
 
         # Pull out Engine Speed signals and write them to their own table
-        xcevents    | "Find Engine Speed readings" >> beam.Map(
-                        make_float,
-                        EngineSpeed.signal_strings) \
-                    | "Filter null Engine Speed" >> beam.ParDo(FilterNull()) \
-                    | "Write EngineSpeed" >> beam.io.Write(beam.io.BigQuerySink(
-                        EngineSpeed.full_table_name,
-                        schema = EngineSpeed.schema,
-                        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
-                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+        process_signal(xcevents, Events.EngineSpeed)
 
         # Pull out Ignition signals and write them to their own table
-        xcevents    | "Find Ignition Status readings" >> beam.Map(
-                        make_boolean,
-                        IgnitionRunStatus.signal_strings,
-                        true_vals = {'run', 'start'},
-                        false_vals = {'off', 'acccessory'}) \
-                    | "Filter null Ignition Status" >> beam.ParDo(FilterNull()) \
-                    | "Write IgnitionRunStatus" >> beam.io.Write(beam.io.BigQuerySink(
-                        IgnitionRunStatus.full_table_name,
-                        schema = IgnitionRunStatus.schema,
-                        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
-                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+        process_signal(xcevents, Events.IngnitionStatus)
 
         # Pull out Latitude and Longitude signals and write them to their own table
-        xcevents    | "Find Latitude signals" >> beam.Map(
-                        make_float,
-                        Latitude.signal_strings) \
-                    | "Filter null Latitude" >> beam.ParDo(FilterNull()) \
-                    | "Write Latitude" >> beam.io.Write(beam.io.BigQuerySink(
-                        Latitude.full_table_name,
-                        schema = Latitude.schema,
-                        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
-                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
-
-        xcevents    | "Find Longitude signals" >> beam.Map(
-                        make_float,
-                        Longitude.signal_strings) \
-                    | "Filter null Longitude" >> beam.ParDo(FilterNull()) \
-                    | "Write Longitude" >> beam.io.Write(beam.io.BigQuerySink(
-                        Longitude.full_table_name,
-                        schema = Longitude.schema,
-                        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
-                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+        process_signal(xcevents, Events.Latitude)
+        process_signal(xcevents, Events.Longitude)
 
         # Get remaining EV range
-        xcevents    | "Find EV range" >> beam.Map(
-                        make_float,
-                        ElectricRange.signal_strings) \
-                    | "Filter null EV range" >> beam.ParDo(FilterNull()) \
-                    | "Write ElectricRange" >> beam.io.Write(beam.io.BigQuerySink(
-                        ElectricRange.full_table_name,
-                        schema = ElectricRange.schema,
-                        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
-                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+        process_signal(xcevents, Events.ElectricRange)
 
         # Get fuel used since restart
-        xcevents    | "Fuel used since restart" >> beam.Map(
-                        make_float,
-                        FuelConsumption.signal_strings) \
-                    | "Filter null Fuel" >> beam.ParDo(FilterNull()) \
-                    | "Write FuelConsumption" >> beam.io.Write(beam.io.BigQuerySink(
-                        FuelConsumption.full_table_name,
-                        schema = FuelConsumption.schema,
-                        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
-                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+        process_signal(xcevents, Events.FuelSinceRestart)
 
         # Get vehicle speed information
-        xcevents    | "Get vehicle speed" >> beam.Map(
-                        make_float,
-                        VehicleSpeed.signal_strings) \
-                    | "Filter null VehicleSpeed" >> beam.ParDo(FilterNull()) \
-                    | "Write VehicleSpeed" >> beam.io.Write(beam.io.BigQuerySink(
-                                    VehicleSpeed.full_table_name,
-                                    schema = VehicleSpeed.schema,
-                                    create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
-                                    write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
-
-        #lines | "Output data to BigQuery" >> beam.io.Write(beam.io.BigQuerySink(
-        #                                        RawEvents.full_table_name,
-        #                                        schema=RawEvents.schema,
-        #                                        create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
-        #                                        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+        process_signal(xcevents, Events.VehicleSpeed)
 
         result = p.run()
         result.wait_until_finish()

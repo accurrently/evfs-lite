@@ -1,260 +1,135 @@
 import datetime
-from enum import Enum
-import json, os
 import settings
-from apache_beam.io.gcp.internal.clients import bigquery
+from enum import Enum, IntEnum
+import os, json
 
-DATASET_PREFIX = settings.ARGS.project + ':'
-REPORT_TIMESTAMP_STR = settings.ARGS.label
-DATASET_NAME_NOPROJECT = 'Report_{ts}'.format(ts=REPORT_TIMESTAMP_STR)
-DATASET_NAME = DATASET_PREFIX + DATASET_NAME_NOPROJECT
+from bqtables import EVBQT, EnumTable, BooleanTable, FloatTable, IntegerTable
+from bqtables import StringTable, ValueType, CustomTable
 
-def bq_table(table_dict_array):
-    tbl = bigquery.TableSchema()
-    for d in table_dict_array:
-        fs = bigquery.TableFieldSchema()
-        if 'name' in d.keys():
-            fs.name = d['name']
-        if 'type' in d.keys():
-            fs.type = d['type']
-        tbl.fields.append(fs)
-    return tbl
+class VehicleSchema:
+    def __init__(self, fname):
+        fullname = os.path.join("schemas", fname)
+        try:
+            j = json.load(fullname)
+            self.Make = j['meta']['make']
+            self.Model = j['meta']['model']
+            self.Year = j['meta']['mod_year']
+            self.Description = j['meta']['description']
+            self.VType = j['meta']['vehicle_type']
+            self.VClass = j['meta']['vehicle_class']
+            self.Fuels = j['meta']['energy_fuels'].split(',')
+            self.Ports = j['meta']['energy_ports'].split(',')
 
-def load_json_list(signal_name):
-    fname = "{sig}.json".format(sig=signal_name)
-    return json.load(open(os.path.join('signalfiles', fname)))
+            self.signals = j['signals']
 
-class ValueType(Enum):
-    Null = 0
-    Bool = 1
-    Number = 2
-    String = 3
-    Multiple = 4
+        except:
+            pass # error
 
-class EVBQT:
-    """
-    EV Big Query Table base class
-    """
-    schema = bigquery.TableSchema()
-    table_name = 'Base'
-    full_table_name = DATASET_NAME + '.' + table_name
-    signal_strings = {}
-    value_type = ValueType.Null
+    def has_signal_string(self, signal, signal_str):
+        if signal in self.signals:
+            if signal_str in dict(self.signals[signal]['signal_strings'].split(",")):
+                return True
+        return False
 
-class RawEvents(EVBQT):
-    """
-    Raw events that will be stored as strings. This is in case we want to do
-    anyhting with the data that we haven't thought of yet.
-    """
-    table_name = 'RawEvents'
-    full_table_name = DATASET_NAME + '.' + table_name
-    schema =  bq_table([
-        {'name': 'VehicleID', 'type': 'string'},
-        {'name': 'EventTime', 'type': 'timestamp'},
-        {'name': 'Signal', 'type': 'string'},
-        {'name': 'Value', 'type': 'string'}
-    ])
-    signal_strings = {}
-    value_type = ValueType.String
+    def supports_signal(self, signal):
+        if signal in self.signals:
+            return True
+        return False
 
-class IgnitionRunStatus(EVBQT):
-    """
-    Ignition (vehicle power) status signal table.
-    Value will be True for ignition status set to "run", and False for "off".
-    """
-    table_name = 'IgnitionRunStatus'
-    full_table_name = DATASET_NAME + '.' + table_name
-    schema = bq_table([
-        {'name': 'VehicleID', 'type': 'string'},
-        {'name': 'EventTime', 'type': 'timestamp'},
-        {'name': 'Value', 'type': 'boolean'}
-    ])
-    signal_strings = load_json_list('IgnitionRunStatus')
-    value_type = ValueType.Bool
+    def get_signal_str(self, signal):
+        if signal in self.signals:
+            return dict(self.signals[signal]['signal_strings'].split(",")):
+        return {}
 
-class ElectricRange(EVBQT):
-    """
-    Remaining all-electric range of the vehicle
-    """
-    table_name = 'ElectricRange'
-    full_table_name = DATASET_NAME + '.' + table_name
-    schema = bq_table([
-        {'name': 'VehicleID', 'type': 'string'},
-        {'name': 'EventTime', 'type': 'timestamp'},
-        {'name': 'Value', 'type': 'float'}
-    ])
-    signal_strings = load_json_list('ElectricRange')
-    value_type = ValueType.Number
+    def get_table(self, signal):
+        if signal in self.signals:
+            if (self.signals[signal]['type'] is 'EnumTable') and ('enum_vals' in self.signals[signal]):
+                return EnumTable(signal, enum_vals = self.signals[signal]['enum_vals'], signal_strings = self.get_signal_str(signal))
+            elif self.signals[signal]['type'] is 'StringTable':
+                return StringTable(signal, signal_strings = self.get_signal_str(signal))
+            elif self.signals[signal]['type'] is 'IntegerTable':
+                rmin = None
+                rmax = None
+                if 'range_max' in self.signals[signal]:
+                    rmax = int(self.signals[signal]['range_max'])
+                if 'range_min' in self.signals[signal]:
+                    rmin = int(self.signals[signal]['range_min'])
+                return IntegerTable(signal, range_min = rmin, range_max = rmax, signal_strings = self.get_signal_str(signal))
+            elif self.signals[signal]['type'] is 'FloatTable':
+                rmin = None
+                rmax = None
+                if 'range_max' in self.signals[signal]:
+                    rmax = int(self.signals[signal]['range_max'])
+                if 'range_min' in self.signals[signal]:
+                    rmin = int(self.signals[signal]['range_min'])
+                return FloatTable(signal, range_min = rmin, range_max = rmax, signal_strings = self.get_signal_str(signal))
+            elif self.signals[signal]['type'] is 'BooleanTable':
+                falses = {}
+                trues = {}
+                default = False
+                if 'false_strings' in self.signals[signal]:
+                    falses = dict(self.signals[signal]['false_strings'].split(","))
+                if 'true_strings' in self.signals[signal]:
+                    falses = dict(self.signals[signal]['true_strings'].split(","))
+                if 'default' in self.signals[signal]:
+                    default = bool(self.signals[signal]['default'])
+                return BooleanTable(signal, true_strings = true, false_strings = falses, default = default, signal_strings = self.get_signal_str(signal))
+        return None
 
-class VehicleSpeed(EVBQT):
-    """
-    Vehicle speed in km/h
-    """
-    table_name = 'VehicleSpeed'
-    full_table_name = DATASET_NAME + '.' + table_name
-    schema = bq_table([
-        {'name': 'VehicleID', 'type': 'string'},
-        {'name': 'EventTime', 'type': 'timestamp'},
-        {'name': 'Value', 'type': 'float'}
-    ])
-    signal_strings = load_json_list('VehicleSpeed')
-    value_type = ValueType.Number
+    def table_list(self):
+        lst = []
+        for k, v in self.signals.iteritems():
+            lst.append(self.get_table(k))
+    return lst
 
-class EngineRunStatus(EVBQT):
-    """
-    Engine (ICE) status signal table.
-    Value will be True for ignition status set to "run", and False for "off".
-    """
-    table_name = 'EngineRunStatus'
-    full_table_name = DATASET_NAME + '.' + table_name
-    schema = bq_table([
-        {'name': 'VehicleID', 'type': 'string'},
-        {'name': 'EventTime', 'type': 'timestamp'},
-        {'name': 'Value', 'type': 'boolean'}
-    ])
-    signal_strings = load_json_list('EngineRunStatus')
-    value_type = ValueType.Bool
+class Events:
 
-class EngineSpeed(EVBQT):
-    """
-    Engine speed reading in RPM.
-    """
-    table_name = 'EngineSpeed'
-    full_table_name = DATASET_NAME + '.' + table_name
-    schema = bq_table([
-        {'name': 'VehicleID', 'type': 'string'},
-        {'name': 'EventTime', 'type': 'timestamp'},
-        {'name': 'Value', 'type': 'float'}
-    ])
-    signal_strings = load_json_list('EngineSpeed')
-    value_type = ValueType.Number
+    RawEvent = EVBQT(
+        'RawEvents',
+        table = [
+            {'name': 'VehicleID', 'type': 'string'},
+            {'name': 'EventTime', 'type': 'timestamp'},
+            {'name': 'Signal', 'type': 'string'},
+            {'name': 'Value', 'type': 'string'}
+        ]
+    )
+    IngnitionStatus = EnumTable( 'IgnitionRunStatus',
+        enum_vals = 'off accessory run start'
+    )
+    EngineStatus = EnumTable( 'EngineStatus',
+        enum_vals = 'off engine_start engine_run_CSER engine_running engine_disabled engine_start_cold_cat'
+    )
+    ChargerType = EnumTable( 'ChargerType',
+        enum_vals = 'EVSE_Not_Detected AC_Level1_120v AC_Level2_120v DC_Fast_Charging'
+    )
+    ChargeStatus = EnumTable( 'ChargeStatus',
+        enum_vals = 'NotReady ChargeWait BatteryChargeReady Charging ChargeComplete Faulted'
+    )
+    ElectricRange = FloatTable('ElectricRange')
+    VehicleSpeed = FloatTable('VehicleSpeed')
+    FuelSinceRestart = FloatTable('FuelSinceRestart')
+    Odometer = FloatTable('Odometer')
+    Latitude = FloatTable('Latitude')
+    Longitude = FloatTable('Longitude')
+    FuelLevel = FloatTable('FuelLevel')
+    EngineSpeed = FloatTable('EngineSpeed')
 
-class Odometer(EVBQT):
-    """
-    Odometer reading in km.
-    """
-    table_name = 'Odometer'
-    full_table_name = DATASET_NAME + '.' + table_name
-    schema = bq_table([
-        {'name': 'VehicleID', 'type': 'string'},
-        {'name': 'EventTime', 'type': 'timestamp'},
-        {'name': 'Value', 'type': 'float'}
-    ])
-    signal_strings = load_json_list('Odometer')
-    value_type = ValueType.Number
-
-class Latitude(EVBQT):
-    """
-    Latitude in degrees
-    """
-    table_name = "Latitude"
-    full_table_name = DATASET_NAME + '.' + table_name
-    schema = bq_table([
-        {'name': 'VehicleID', 'type': 'string'},
-        {'name': 'EventTime', 'type': 'timestamp'},
-        {'name': 'Value', 'type': 'float'}
-    ])
-    signal_strings = load_json_list('Latitude')
-    value_type = ValueType.Number
-
-class Longitude(EVBQT):
-    """
-    Longitude in degrees
-    """
-    table_name = "Longitude"
-    full_table_name = DATASET_NAME + '.' + table_name
-    schema = bq_table([
-        {'name': 'VehicleID', 'type': 'string'},
-        {'name': 'EventTime', 'type': 'timestamp'},
-        {'name': 'Value', 'type': 'float'}
-    ])
-    signal_strings = load_json_list('Longitude')
-    value_type = ValueType.Number
-
-class FuelConsumption(EVBQT):
-    """
-    Fuel used since restart in microliters.
-    """
-    table_name = 'FuelConsumption'
-    full_table_name = DATASET_NAME + '.' + table_name
-    schema = bq_table([
-        {'name': 'VehicleID',   'type': 'string'},
-        {'name': 'EventTime', 'type': 'timestamp'},
-        {'name': 'Value', 'type': 'float'}
-    ])
-    signal_strings = load_json_list('FuelConsumption')
-    value_type = ValueType.Number
-
-class Trips(EVBQT):
-    """
-    Trips that are taken, as defined by the ignition status set to 'run'.
-    """
-    table_name = 'Trips'
-    full_table_name = DATASET_NAME + '.' + table_name
-    schema = bq_table([
-        {'name': 'VehicleID', 'type': 'string'},
-        {'name': 'StartTime', 'type': 'timestamp'},
-        {'name': 'EndTime', 'type': 'timetamp'},
-        {'name': 'DistanceTraveled', 'type': 'float'},
-        {'name': 'EngineStarts', 'type': 'integer'},
-        {'name': 'ElectricDistance', 'type': 'float'},
-        {'name': 'ElectricityUsed', 'type': 'float'},
-        {'name': 'FuelDistance', 'type': 'float'},
-        {'name': 'FuelUsed', 'type': 'float'},
-    ])
-    value_type = ValueType.Multiple
-
-
-class Stops(EVBQT):
-    """
-    Stops that are taken as defined by the ignition status set to 'off'
-    """
-    table_name = 'Stops'
-    full_table_name = DATASET_NAME + '.' + table_name
-    schema = bq_table([
-        {'name': 'VehicleID', 'type': 'string'},
-        {'name': 'StartTime', 'type': 'timestamp'},
-        {'name': 'EndTime', 'type': 'timestamp'},
-        {'name': 'Latitude', 'type': 'float'},
-        {'name': 'Longitude', 'type': 'float'},
-        {'name': 'GPS', 'type': 'string'},
-#        {'name': 'BattryChargeAdded', 'type': 'float'},
-        {'name': 'PluggedIn', 'type': 'boolean'},
-#        {'name': 'NearbyChargers', 'type': 'integer'},
-        {'name': 'ChargeEvent', 'type': 'boolean'},
-#        {'name': 'PotentialChargeEvent', 'type': 'boolean'}
-    ])
-
-class GPSTrace(EVBQT):
-    """
-    GPS Traces, averaged over 1 minute intervals
-    """
-    table_name = 'GPSTraces'
-    full_table_name = DATASET_NAME + '.' + table_name
-    schema = bq_table([
-        {'name': 'VehicleID', 'type': 'string'},
-        {'name': 'Time', 'type': 'timestamp'},
-        {'name': 'Latitude', 'type': 'float'},
-        {'name': 'Longitude', 'type': 'float'},
-    ])
-    value_type = ValueType.Multiple
-
-class FleetDailyStats(EVBQT):
-    """
-    Aggregation of daily statistics
-    """
-    table_name = 'FleetDailyStatistics'
-    full_table_name = DATASET_NAME + '.' + table_name
-    schema = bq_table([
-        {'name': 'Date', 'type': 'timestamp'},
-        {'name': 'TotalDistance', 'type': 'float'},
-        {'name': 'TotalElectricDistance', 'type': 'float'},
-        {'name': 'TotalFuelDistance', 'type': 'float'},
-        {'name': 'ChargeEvents', 'type': 'integer'},
-        {'name': 'MissedChargeEvents', 'type': 'integer'},
-        {'name': 'PotentialChargeEvents', 'type': 'integer'},
-        {'name': 'TotalFuelUsed', 'type': 'float'},
-        {'name': 'TotalElectricityUsed', 'type': 'float'},
-        {'name': 'TotalFuelAdded', 'type': 'float'},
-        {'name': 'TotalElectricityAdded', 'type': 'float'}
-    ])
+    def lookup_by_signal_string(self, sig):
+        d = {
+            'ignition_status' : Events.IngnitionStatus,
+            'engine_start' : Events.EngineStatus,
+            'electric_range' : Events.ElectricRange,
+            'vehicle_speed' : Events.VehicleSpeed,
+            'odometer' : Events.Odometer,
+            'latitude' : Events.Latitude,
+            'longitude' : Events.Longitude,
+            'fuel_level' : Events.FuelLevel,
+            'fuel_consumed_since_restart' : Events.FuelSinceRestart,
+            'engine_speed' : Events.EngineSpeed,
+            'charger_type' : Events.ChargerType,
+            'charge_ready_status' : Events.ChargeStatus,
+            'range_per_charge_available': Events.ElectricRange
+        }
+        if sig in d:
+            return d[sig]
+        return None

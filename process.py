@@ -1,9 +1,11 @@
 from google.cloud import bigquery
 import settings
-from schemas import ValueType
-from schemas import RawEvents, FleetDailyStats, GPSTrace, Stops, Trips, DATASET_NAME
-from schemas import ElectricRange, EngineSpeed, EngineRunStatus, IgnitionRunStatus
-from schemas import Latitude, Longitude, FuelSinceRestart, Odometer
+from schemas import ValueType, EVBQT
+from schemas import Events
+
+from bqtables import EVBQT, NumberTable, IntegerTable
+from bqtables import FloatTable, CustomTable, EnumTable, StringTable
+
 import statistics, uuid, logging, datetime, time
 
 import apache_beam as beam
@@ -44,6 +46,8 @@ class SQLSTR:
     VALUE_STATS = settings.load_sql('value_stats.sql')
     # Returns a specific statistic function (for speed)
     VALUE_STAT_FUNC = settings.load_sql('value_stat_func.sql')
+    # Returns a simple count of values that match input value
+    VALUE_COUNT = settings.load_sql('value_count.sql')
 
     # Get a GPS trace for a vehicle
     GPS_TRACE = settings.load_sql('gps_trace.sql')
@@ -68,41 +72,108 @@ def time_bracket_str(begin, end):
     q = 'UNIX_SECONDS(EventTime) >= {begin} AND UNIX_SECONDS(EventTime) <= {end}'
     return q.format(begin=begin_ts, end=end_ts)
 
+class EVQuery(object):
+    def __init__(self, vehicle_id, signal_class, sql = '', params = {},
+        begin = DEFAULT_DATETIME_START, end = DEFAULT_DATETIME_END):
 
-def get_bracket_query_str(vehicle_id, table_class, value, order='ASC',
+        self.params = {}
+
+        if isinstance(vehicle_id, str):
+            self.params['vehicle_id'] = vehicle_id
+        else:
+            raise TypeError('vehicle_id must be of type str')
+
+        if isinstance(signal_class, EVBQT):
+            self.params['table_name'] = signal_class.full_table_name()
+        else:
+            raise TypeError('signal_class must be a class or sublass of EVBQT')
+
+        if isinstance(begin, datetime.datetime):
+            self.params['bracket_begin'] = datetime_to_float(begin)
+        else:
+            raise TypeError('begin must be of type datetime.datetime')
+
+        if isinstance(end, datetime.datetime):
+            self.params['bracket_end'] = datetime_to_float(end)
+        else:
+            raise TypeError('end must be of type datetime.datetime')
+
+        self.params['time_bracket'] = time_bracket_str(begin, end)
+
+        if isinstance(sql, str):
+            self.sql = sql
+        else:
+            raise TypeError('sql must be of type str')
+
+        if isinstance(params, dict):
+            self.params.update(params)
+        else:
+            raise TypeError('params must be of type dict')
+
+    def set_bracket(self, begin, end):
+        if not isinstance(begin, datetime.datetime):
+            raise TypeError('begin must be of type datetime.datetime')
+        if not isinstance(end, datetime.datetime):
+            raise TypeError('end must be of type datetime.datetime')
+        self.params['bracket_begin'] = datetime_to_float(begin)
+        self.params['bracket_end'] = datetime_to_float(end)
+        self.params['time_bracket'] = time_bracket_str(begin, end)
+        return self
+
+    def set_signal_class(self, signal_class):
+        if isinstance(signal_class, EVBQT):
+            self.params['table_name'] = signal_class.full_table_name
+        else:
+            raise TypeError('signal_clas must be a class or sublass of EVBQT')
+
+    def set_vid(self, vid):
+        if not isinstance(begin, datetime.datetime):
+            raise TypeError('begin must be of type datetime.datetime')
+        self.params['vehicle_id'] = vid
+        return self
+
+    def set_params(self, parameters = None):
+        if not isinstance(parameters, dict):
+            raise TypeError('parameters must be of type dict')
+        self.params.update(parameters)
+
+    def query_string(self):
+        return self.sql.format(**self.params)
+
+    def __str__(self):
+        return self.query_string()
+
+    def run_async_query(self):
+        query = self.query_string()
+        client = bigquery.Client()
+        job = client.run_async_query(str(uuid.uuid4()), query)
+        job.begin()
+        job.result()
+        destination_table = job.destination
+        destination_table.reload()
+        return destination_table.fetch_data()
+
+def get_bracket_query(vehicle_id, signal_class, value,
         prebracket_begin = DEFAULT_DATETIME_START, prebracket_end = DEFAULT_DATETIME_END):
-    val = value
-    if isinstance(value, str):
-        val = value.translate(None, "\"\'")
-        newval = "\"{v}\"".format(v=val)
-    return SQLSTR.BRACKETS.format(
-        table_name = table_class.full_table_name,
-        value = val,
-        order = order,
-        prebracket_begin = prebracket_begin,
-        prebracket_end = prebracket_end
-    )
+    val = signal_class.sql_convert(value)
+    return EVQuery(vehicle_id, signal_class, sql = SQLSTR.BRACKETS,
+                    begin = prebracket_begin, end = prebracket_end,
+                    params = { 'value' : val, 'order' : order})
 
-def get_signals_query_str(vehicle_id, signal_class, order = 'ASC',
+def get_signals_query(vehicle_id, signal_class, order = 'ASC',
         bracket_begin = DEFAULT_DATETIME_START, bracket_end = DEFAULT_DATETIME_END):
-    return SQLSTR.SIGNALS.format(
-        table_name = signal_class.full_table_name,
-        vehicle_id = vehicle_id,
-        time_bracket = time_bracket_str(bracket_begin, bracket_end)
-        order = order
-    )
+    return EVQuery(vehicle_id, signal_class, sql = SQLSTR.SIGNALS,
+                    begin = bracket_begin, end = bracket_end,
+                    params = {'order' : order})
 
-def get_signals_interval_avg_query_str(vehicle_id, signal_class, interval_sec = 60,
+def get_signals_interval_avg_query(vehicle_id, signal_class, interval_sec = 60,
         bracket_begin = DEFAULT_DATETIME_START, bracket_end = DEFAULT_DATETIME_END):
-    if signal_class.value_type == ValueType.Number:
-        return SQLSTR.SIGNALS_INTERVAL_AVG.format(
-            table_name = signal_class.full_table_name,
-            vehicle_id = vehicle_id,
-            interval = interval_sec,
-            time_bracket = time_bracket_str(bracket_begin, bracket_end)
-        )
+    if isinstance(signal_class, NumberTable):
+        return EVQuery(vehicle_id, signal_class, sql = SQLSTR.SIGNALS_INTERVAL_AVG,
+                        begin = bracket_begin, end = bracket_end,
+                        params = {'interval' : interval_sec})
 
-def value_statfunc_query_str(vehicle_id, signal_class, function_name,
+def value_statfunc_query(vehicle_id, signal_class, function_name,
         bracket_begin = DEFAULT_DATETIME_START, bracket_end = DEFAULT_DATETIME_END):
     allowed_functions = {
         "AVG" : SQLSTR.VALUE_STAT_FUNC,
@@ -116,30 +187,34 @@ def value_statfunc_query_str(vehicle_id, signal_class, function_name,
         "COUNT" : SQLSTR.VALUE_STAT_FUNC,
         "DELTA" : SQLSTR.VALUE_DELTA,
     }
-    if signal_class.value_type == ValueType.Number:
+    if isinstance(signal_class, NumberTable):
         if function_name in allowed_functions:
-            return allowed_functions[function_name].format(
-                table_name = signal_class.full_table_name,
-                vehicle_id = vehicle_id,
-                func = function_name,
-                time_bracket = time_bracket_str(bracket_begin, bracket_end)
-            )
+            return EVQuery(vehicle_id, signal_class, sql = allowed_functions[function_name],
+                    begin = bracket_begin, end = bracket_end, params = {'func' : function_name})
     return None
 
-def get_gps_trace_query_str(vehicle_id, interval_sec = 60
+def count_values_query(vehicle_id, signal_class, value, bracket_begin = DEFAULT_DATETIME_START, bracket_end = DEFAULT_DATETIME_END):
+    """
+    Returns a SQL query string that finds a simple count of events where Value = value.
+    """
+    return EVQuery(vehicle_id, signal_class, sql = SQLSTR.VALUE_COUNT,
+            begin = bracket_begin, end = bracket_end, params ={'value': value})
+
+def get_gps_trace_query(vehicle_id, interval_sec = 60
     latitude_class = Latitude, longitude_class = Longitude,
     bracket_begin = DEFAULT_DATETIME_START, bracket_end = DEFAULT_DATETIME_END):
     """
     This function will return a SQL query string that will look for GPS coordinates
     averaged over the interval time in seconds given in interval_sec.
     """
-    return SQLSTR.GPS_TRACE.format(
-        vehicle_id = vehicle_id,
-        interval = interval_sec,
-        lat_table = latitude_class.full_table_name,
-        lon_table = longitude_class.full_table_name,
-        time_bracket = time_bracket_str(bracket_begin, bracket_end)
-    )
+    return EVQuery(vehicle_id, latitude_class, begin = bracket_begin, end = bracket_end,
+                    sql = SQLSTR.GPS_TRACE,
+                    params = {
+                        'lat_table' : latitude_class.full_table_name(),
+                        'lon_table' : longitude_class.full_table_name(),
+                        'interval' : interval_sec
+                    }
+            )
 
 def run_async_query(query):
     client = bigquery.Client()
@@ -160,7 +235,7 @@ def trip_distance(vehicle_id, trip_begin = DEFAULT_DATETIME_START, trip_end = DE
     """
     q = value_statfunc_query_str(vehicle_id, Odometer, 'DELTA',
         bracket_begin = trip_begin, bracket_end = trip_end)
-    rows = run_async_query(q)
+    rows = q.run_async_query()
     dist = 0
     for row in rows:
         dist = row['Result']
@@ -170,8 +245,8 @@ def trip_engine_starts(vehicle_id, trip_begin, trip_end):
     """
     Get the number of times the engine starts during the trip.
     """
-    q = get_signals_query_str(vehicle_id, EngineRunStatus, bracket_begin = trip_begin, bracket_end = trip_end)
-    rows = run_async_query(q)
+    q = get_signals_query(vehicle_id, , bracket_begin = trip_begin, bracket_end = trip_end)
+    rows = q.run_async_query()
     engine_running = False
     start_count = 0
     for row in rows:
@@ -187,78 +262,20 @@ def trip_engine_starts(vehicle_id, trip_begin, trip_end):
 
     return start_count
 
-def trip_fuel_consumed(vehicle_id, trip_begin, trip_end, engine_signal='fuel_consumed_since_restart'):
+def trip_fuel_consumed(vehicle_id, trip_begin, trip_end, engine_signal=FuelConsumed):
     """
     Get the amount of fuel used for the trip.
     """
-    q ="""
-    SELECT
-        Value,
-        EventTime
-    FROM
-        {table_name}
-    WHERE (
-        (EventTime >= {begin_bracket})
-        AND (EventTime <= {end_bracket})
-        AND (VehicleID = "{vehicle_id}")
-        AND (Signal = "{engine_signal}")
-    )
-    ORDER BY
-        EventTime
-    DESC
-    LIMIT 1
-    """.format(
-        vehicle_id = vehicle_id,
-        begin_bracket=trip_begin,
-        end_bracket=trip_end,
-        engine_signal=engine_signal,
-        table_name=RawEvents.full_table_name
-    )
-    client = bigquery.Client()
-    job = client.run_async_query(str(uuid.uuid4()), q)
-    job.begin()
-    job.result()
-    destination_table = job.destination
-    destination_table.reload()
-    rows = destination_table.fetch_data()
-    fuel_used = 0
-    for row in rows:
-        fuel_used = float(row['Value'])*1000000
-    return fuel_used
+    pass
 
-def trip_electric_distance(vehicle_id, trip_begin, trip_end, engine_signal='engine_speed', engine_value = '0'):
-    electric_brackets = get_bracket_query_str(vehicle_id, engine_signal, engine_value, prebracket_begin=trip_begin, prebracket_end=trip_end)
-    rows = run_async_query(electric_brackets)
+def trip_electric_distance(vehicle_id, trip_begin, trip_end, engine_signal = EngineSpeed, engine_value = '0'):
+    q = get_bracket_query(vehicle_id, engine_signal, engine_value, prebracket_begin=trip_begin, prebracket_end=trip_end)
+    rows = q.run_async_query()
     dist = 0
     for row in rows:
-        dist += trip_distance(vehicle_id, rowp['StartTime'], row['EndTime'])
+        dist += trip_distance(vehicle_id, row['StartTime'], row['EndTime'])
     return dist
 
-def trip_fuel_used(vehicle_id, trip_begin, trip_end, signal='fuel_consumed_since_restart'):
-    q = """
-        SELECT
-            Value
-        FROM
-            {table_name}
-        WHERE (
-            Signal = "{signal}"
-            AND (EventTime >= {trip_begin})
-            AND (EventTime <= {trip_end})
-        )
-        ORDER BY
-            EventTime
-        DESC
-        LIMIT 1
-    """.format(
-        table_name = RawEvents.full_table_name,
-        signal = signal,
-        trip_begin = trip_begin,
-        trip_end = trip_end
-    )
-    results = run_async_query(q)
-    fuel = 0
-    for result in results:
-        fuel += float(result['Value'])
 
 class TripProcessDoFn(beam.DoFn):
     def process(self, element):
@@ -313,7 +330,7 @@ class ProcessTripData(beam.DoFn):
     """
     Processes all the trips.
     """
-    def expand(self, pcoll):
+    def process(self, pcoll):
 
         trip_brackets = pcoll | "Read trip brackets" >> beam.io.Read(beam.io.BigQuerySource(
             get_bracket_query_str(
@@ -345,45 +362,16 @@ class ProcessStopsDoFn(beam.DoFn):
     def process(self, element):
 
         logging.info('Calculating statistics for stop...')
-        latitude_query = """
-            SELECT
-                AVG(FLOAT(Value)) AvgValue
-            FROM
-                {table_name}
-            WHERE
-                VehicleID="{vehicle_id}"
-                AND
-                Signal = "latitude"
-                AND
-                EventTime >= {begin_time}
-                AND
-                EventTime <= {end_time}
-        """.format(
-            vehicle_id=element['VehicleID'],
-            table_name=RawEvents.full_table_name,
-            begin_time=element['StartTime'],
-            end_time=element['EndTime']
-        )
-
-        longitude_query = """\
-            SELECT
-                AVG(FLOAT(Value)) AvgValue
-            FROM
-                {table_name}
-            WHERE
-                VehicleID = "{vehicle_id}"
-                AND
-                Signal = "longitude"
-                AND
-                EventTime >= {begin_time}
-                AND
-                EventTime <= {end_time}
-        """.format(
-            vehicle_id=element['VehicleID'],
-            table_name=RawEvents.full_table_name,
-            begin_time=element['StartTime'],
-            end_time=element['EndTime']
-        )
+        gps_traces = EVQuery( element['VehicleID'],
+            EVBQT,
+            sql = SQLSTR.GPS_TRACE,
+            params = {
+                'lat_table': Latitude.full_table_name,
+                'lon_table': Longitude.full_table_name
+            },
+            begin = element['StartTime'],
+            end = element['EndTime']
+        ).run_async_query()
 
         plugged_in_query = """\
             SELECT

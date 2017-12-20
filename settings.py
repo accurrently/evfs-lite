@@ -51,9 +51,7 @@ def get_args(argv=None):
 
 ARGS = get_args()
 
-def load_sql(filename):
-    path = os.path.join('sql', filename)
-    q = None
-    with open(path, 'r') as thefile:
-        q = thefile.read().replace('\n', '').replace('\t', ' ')
-    return q
+DATASET_PREFIX = ARGS.project
+REPORT_LABEL = ARGS.label
+REPORT_NAME = 'Report_{}'.format(REPORT_LABEL)
+DATASET_NAME = "{}:{}".format(DATASET_PREFIX, REPORT_NAME)
