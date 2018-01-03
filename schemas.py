@@ -3,8 +3,9 @@ import settings
 from enum import Enum, IntEnum
 import os, json
 
-from bqtables import EVBQT, EnumTable, BooleanTable, FloatTable, IntegerTable
-from bqtables import StringTable, ValueType, CustomTable
+from bqtables import StringArray, StringTable
+from bqtables import FloatArray, FloatTable, NumberTable, IntegerArray, IntegerTable
+from bqtables import EVBQT, CustomTable, EnumTable
 
 class VehicleSchema:
     def __init__(self, fname):
@@ -38,7 +39,7 @@ class VehicleSchema:
 
     def get_signal_str(self, signal):
         if signal in self.signals:
-            return dict(self.signals[signal]['signal_strings'].split(",")):
+            return dict(self.signals[signal]['signal_strings'].split(","))
         return {}
 
     def get_table(self, signal):
@@ -80,56 +81,111 @@ class VehicleSchema:
         lst = []
         for k, v in self.signals.iteritems():
             lst.append(self.get_table(k))
-    return lst
+        return lst
 
-class Events:
+class EventsClass:
 
-    RawEvent = EVBQT(
-        'RawEvents',
-        table = [
-            {'name': 'VehicleID', 'type': 'string'},
-            {'name': 'EventTime', 'type': 'timestamp'},
-            {'name': 'Signal', 'type': 'string'},
-            {'name': 'Value', 'type': 'string'}
-        ]
-    )
-    IngnitionStatus = EnumTable( 'IgnitionRunStatus',
-        enum_vals = 'off accessory run start'
-    )
-    EngineStatus = EnumTable( 'EngineStatus',
-        enum_vals = 'off engine_start engine_run_CSER engine_running engine_disabled engine_start_cold_cat'
-    )
-    ChargerType = EnumTable( 'ChargerType',
-        enum_vals = 'EVSE_Not_Detected AC_Level1_120v AC_Level2_120v DC_Fast_Charging'
-    )
-    ChargeStatus = EnumTable( 'ChargeStatus',
-        enum_vals = 'NotReady ChargeWait BatteryChargeReady Charging ChargeComplete Faulted'
-    )
-    ElectricRange = FloatTable('ElectricRange')
-    VehicleSpeed = FloatTable('VehicleSpeed')
-    FuelSinceRestart = FloatTable('FuelSinceRestart')
-    Odometer = FloatTable('Odometer')
-    Latitude = FloatTable('Latitude')
-    Longitude = FloatTable('Longitude')
-    FuelLevel = FloatTable('FuelLevel')
-    EngineSpeed = FloatTable('EngineSpeed')
+    def __init__(self):
+
+        self.RawEvent = EVBQT(
+            'RawEvents',
+            table = [
+                {'name': 'VehicleID', 'type': 'string'},
+                {'name': 'EventTime', 'type': 'timestamp'},
+                {'name': 'Signal', 'type': 'string'},
+                {'name': 'Value', 'type': 'string'}
+            ]
+        )
+        self.IngnitionStatus = EnumTable( 'IgnitionRunStatus',
+            enum_vals = 'off accessory run start'
+        )
+        self.EngineStatus = EnumTable( 'EngineStatus',
+            enum_vals = 'off engine_start engine_run_CSER engine_running engine_disabled engine_start_cold_cat'
+        )
+        self.ChargerType = EnumTable( 'ChargerType',
+            enum_vals = 'EVSE_Not_Detected AC_Level1_120v AC_Level2_120v DC_Fast_Charging'
+        )
+        self.ChargeStatus = EnumTable( 'ChargeStatus',
+            enum_vals = 'NotReady ChargeWait BatteryChargeReady Charging ChargeComplete Faulted'
+        )
+        self.ElectricRange = FloatTable('ElectricRange')
+        self.VehicleSpeed = FloatTable('VehicleSpeed')
+        self.FuelSinceRestart = FloatTable('FuelSinceRestart')
+        self.Odometer = FloatTable('Odometer')
+        self.Latitude = FloatTable('Latitude')
+        self.Longitude = FloatTable('Longitude')
+        self.FuelLevel = FloatTable('FuelLevel')
+        self.EngineSpeed = FloatTable('EngineSpeed')
+        self.BatterySOC = FloatTable('BatterySOC')
 
     def lookup_by_signal_string(self, sig):
         d = {
-            'ignition_status' : Events.IngnitionStatus,
-            'engine_start' : Events.EngineStatus,
-            'electric_range' : Events.ElectricRange,
-            'vehicle_speed' : Events.VehicleSpeed,
-            'odometer' : Events.Odometer,
-            'latitude' : Events.Latitude,
-            'longitude' : Events.Longitude,
-            'fuel_level' : Events.FuelLevel,
-            'fuel_consumed_since_restart' : Events.FuelSinceRestart,
-            'engine_speed' : Events.EngineSpeed,
-            'charger_type' : Events.ChargerType,
-            'charge_ready_status' : Events.ChargeStatus,
-            'range_per_charge_available': Events.ElectricRange
+            'ignition_status' : self.IngnitionStatus,
+            'engine_start' : self.EngineStatus,
+            'electric_range' : self.ElectricRange,
+            'vehicle_speed' : self.VehicleSpeed,
+            'odometer' : self.Odometer,
+            'latitude' : self.Latitude,
+            'longitude' : self.Longitude,
+            'fuel_level' : self.FuelLevel,
+            'fuel_consumed_since_restart' : self.FuelSinceRestart,
+            'engine_speed' : self.EngineSpeed,
+            'charger_type' : self.ChargerType,
+            'charge_ready_status' : self.ChargeStatus,
+            'range_per_charge_available': self.ElectricRange,
+            'battery_level' : self.BatterySOC
         }
         if sig in d:
             return d[sig]
         return None
+
+Events = EventsClass()
+
+class ReportsClass:
+    def __init__(self):
+        self.Trips = CustomTable( 'Trips',
+            table = [
+                {'name': 'VehicleID', 'type': 'string'},
+                {'name': 'StartTime', 'type': 'timestamp'},
+                {'name': 'EndTime', 'type': 'timestamp'},
+                {'name': 'Duration', 'type': 'float'},
+                {'name': 'FuelConsumed', 'type': 'float'},
+                {'name': 'TankConsumed', 'type': 'float'},
+                {'name': 'BatterySOCMax', 'type': 'float'},
+                {'name': 'BatterySOCMin', 'type': 'float'},
+                {'name': 'BatterySOCDelta', 'type': 'float'},
+                {'name': 'Distance', 'type': 'float'},
+                {'name': 'SpeedMax', 'type': 'float'},
+                {'name': 'SpeedAvg', 'type': 'float'},
+                {'name': 'ElectricRangeConsumed', 'type': 'float'},
+                {'name': 'StartLatitude', 'type': 'float'},
+                {'name': 'StartLongitude', 'type': 'float'},
+                {'name': 'EndLatitude', 'type': 'float'},
+                {'name': 'EndLongitude', 'type': 'float'},
+                {'name': 'StartLatong', 'type': 'string'},
+                {'name': 'EndLatLong', 'type': 'string'}
+            ]
+        )
+        self.Stops = CustomTable( 'Stops',
+            table = [
+                {'name': 'VehicleID', 'type': 'string'},
+                {'name': 'StartTime', 'type': 'timestamp'},
+                {'name': 'EndTime', 'type': 'timestamp'},
+                {'name': 'Duration', 'type': 'float'},
+                {'name': 'Charged', 'type': 'boolean'},
+                {'name': 'ChargeCompleted', 'type': 'boolean'},
+                {'name': 'HighestChargeLevel', 'type': 'integer'},
+                {'name': 'ChargeFault', 'type': 'boolean'},
+                {'name': 'Latitude', 'type': 'float'},
+                {'name': 'Longitude', 'type': 'float'},
+                {'name': 'LatLong', 'type': 'string'}
+            ]
+        )
+
+Reports = ReportsClass()
+
+class ArraysClass:
+    def __init__(self):
+        self.VehicleIDs = StringArray('VehicleIDs')
+
+Arrays = ArraysClass()

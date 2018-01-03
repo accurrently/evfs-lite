@@ -1,0 +1,4 @@
+SELECT
+  Value
+FROM
+  {table}

@@ -2,34 +2,33 @@ import settings
 import datetime
 import re
 from utils import load_json_list
-from enum import Enum
-from apache_beam.io.gcp.internal.clients import bigquery
+from google.cloud import bigquery
 
 def bq_table(table_dict_array):
-    tbl = bigquery.TableSchema()
+    from apache_beam.io.gcp.internal.clients import bigquery
+    ts = bigquery.TableSchema()
     for d in table_dict_array:
         fs = bigquery.TableFieldSchema()
-        if 'name' in d.keys():
+        if ('name' in d.keys()) and ('type' in d.keys()):
             fs.name = d['name']
-        if 'type' in d.keys():
             fs.type = d['type']
-        tbl.fields.append(fs)
-    return tbl
+        fs.mode = 'nullable'
+        if 'mode' in d.keys():
+            fs.mode = d['mode']
+        ts.fields.append(fs)
+    return ts
 
-class EVBQT:
+class EVBQT(object):
     """
     EV Big Query Table base class
     """
-    # schema = bigquery.TableSchema()
-    # table_name = 'Base'
-
     def __init__(self, name, table = [{}], signal_strings = {}):
         self.name = name
         self.schema = table
         self.signal_strings = signal_strings
 
     def full_table_name(self):
-        return "{a}.{b}".format(a = DATASET_NAME, b = self.name)
+        return "{a}.{b}".format(a = settings.DATASET_NAME, b = self.name)
 
     def bq_schema(self):
         return bq_table(self.schema)
@@ -61,10 +60,18 @@ class EVBQT:
     def sql_convert(self, val):
         return "{value}".format(value = val)
 
+
+
 class StringTable(EVBQT):
-    def __init__(self, name, table = [{}], signal_strings = {}):
-        super().__init__(name, table, signal_strings = signal_strings)
-        self.value_type = ValueType.String
+    def __init__(self, name, table = [], signal_strings = {}):
+        tbl = [
+            {'name': 'VehicleID', 'type': 'string'},
+            {'name': 'EventTime', 'type': 'timestamp'},
+            {'name': 'Value', 'type': 'string'}
+        ]
+        if len(table) > 0:
+            tbl = table
+        super(StringTable, self).__init__(name, table = tbl, signal_strings = signal_strings)
 
     def validate(self, val):
         if isinstance(val, str):
@@ -79,7 +86,7 @@ class StringTable(EVBQT):
 
 class EnumTable(EVBQT):
 
-    def __init__(self, name, enum_vals = '', table = [], signal_strings = {}):
+    def __init__(self, name, enum_vals = '', table = [], signal_strings = {}, start_at_zero = False):
         tbl = [
             {'name': 'VehicleID', 'type': 'string'},
             {'name': 'EventTime', 'type': 'timestamp'},
@@ -87,31 +94,47 @@ class EnumTable(EVBQT):
         ]
         if len(table) > 0:
             tbl = table
-        super().__init__(name, tbl, signal_strings)
-        self.Values = IntEnum(name, enum_vals)
+        super(EnumTable, self).__init__(name, tbl, signal_strings)
+        self.Values = enum_vals.split(' ')
+        self.z = 1
+        if start_at_zero:
+            self.z = 0
+
+    def lookup(self, input_str):
+        return self.parse(input_str)
+
+    def get_ename(self, val):
+        if 0 <= val - z <= len(self.Values):
+            return self.Values[val - z]
 
     def parse(self, input_str):
-        if input_str in self.Values.__members__:
-            return self.Values[input_str]
+        try:
+            i = self.Values.index(input_str)
+            return i + self.z
+        except ValueError:
+            return 0
         return 0
 
     def validate(self, val):
         if isinstance(val, str):
-            if val in self.Values.__members__:
-                return True
+            try:
+                i = self.Values.index(input_str)
+            except ValueError:
+                return False
+            return True
         elif isinstance(val, int):
-             return (any(val == item.value for item in self.Values))
-        elif isinstance(val, Enum) or isinstance(val, IntEnum):
-            return (any(val.value == item.value for item in self.Values))
+             return 0 <= val <= len(self.Values)
         return False
 
     def convert(self, val):
-        if isinstance(val, str):
-            return self.lookup_enum(val)
-        return int(val)
+        if self.validate(val):
+            if isinstance(val, str):
+                return self.parse(val)
+            return val
+        return 0
 
     def sql_convert(self, val):
-        return "{value}".format(value = int(val))
+        return "{value}".format(value = self.convert(val))
 
 class NumberTable(EVBQT):
     def __init__(self, name, table = [], signal_strings = {}, range_min = None, range_max = None):
@@ -122,7 +145,7 @@ class NumberTable(EVBQT):
         ]
         if len(table) > 0:
             tbl = table
-        super().__init__(name, tbl, signal_strings)
+        super(NumberTable, self).__init__(name, tbl, signal_strings)
         self.max = range_max
         self.min = range_min
 
@@ -136,7 +159,7 @@ class IntegerTable(NumberTable):
         ]
         if len(table) > 0:
             tbl = table
-        super().__init__(name, tbl, signal_strings, range_min = range_min, range_max = range_max)
+        super(IntegerTable, self).__init__(name, tbl, signal_strings, range_min = range_min, range_max = range_max)
 
     def validate(self, val):
         if isinstance(val, int):
@@ -166,7 +189,7 @@ class FloatTable(NumberTable):
         ]
         if len(table) > 0:
             tbl = table
-        super().__init__(name, tbl, signal_strings, range_min = range_min, range_max = range_max)
+        super(FloatTable, self).__init__(name, tbl, signal_strings, range_min = range_min, range_max = range_max)
 
     def validate(self, val):
         if isinstance(val, float):
@@ -196,13 +219,13 @@ class BooleanTable(EVBQT):
         ]
         if len(table) > 0:
             tbl = table
-        super().__init__(name, tbl, signal_strings)
+        super(BooleanTable, self).__init__(name, tbl, signal_strings)
         self.trues = true_strings
         self.falses = false_strings
         self.default = default
 
     def validate(self, val):
-        return isinstance(val, bool):
+        return isinstance(val, bool)
 
     def parse(self, input_str):
         if input_str in self.trues:
@@ -217,16 +240,28 @@ class BooleanTable(EVBQT):
     def sql_convert(self, val):
         return "{value}".format(value = str(bool(val)).upper())
 
+class StringArray(StringTable):
+    def __init__(self, name):
+        tbl = [{'name': 'Value', 'type': 'string'}]
+        super(StringArray, self).__init__(name, table = tbl)
+class IntegerArray(IntegerTable):
+    def __init__(self, name):
+        tbl = [{'name': 'Value', 'type': 'integer'}]
+        super(IntergerArray, self).__init__(name, table = tbl)
+class FloatArray(FloatTable):
+    def __init__(self, name):
+        tbl = [{'name': 'Value', 'type': 'float'}]
+        super(FloatArray, self).__init__(name, table = tbl)
+
 class CustomTable(EVBQT):
 
     def __init__(self, name, table = [], signal_strings = {}, parse_func = None, convert_func = None, sql_convert_func = None, valid_func = None):
-        super().__init__(name, table, signal_strings)
-        self.pf = super().parse
-        self.cf = super().convert
-        self.scf = super().sql_convert
-        self.vld = super().valid
-        if callable(parse_func):
-            self.pf = parse_func
+        super(CustomTable, self).__init__(name, table, signal_strings)
+        self.pf = parse_func
+        self.cf = convert_func
+        self.scf = sql_convert_func
+        self.vld = valid_func
+
         if callable(convert_func):
             self.cf = convert_func
         if callable(sql_convert_func):
@@ -235,13 +270,21 @@ class CustomTable(EVBQT):
             self.vld = valid_func
 
     def validate(self, val):
-        return self.vld(val)
+        if callable(self.cf):
+            return self.vld(val)
+        return super(CustomTable, self).valid(val)
 
     def parse(self, input_str):
-        return self.pf(input_str)
+        if callable(self.pf):
+            return self.pf(input_str)
+        return super(CustomTable, self).parse(input_str)
 
     def convert(self, val):
-        return self.cf(val)
+        if callable(self.cf):
+            return self.cf(val)
+        return super(CustomTable, self).convert(val)
 
     def sql_convert(self, val):
-        return self.scf(val)
+        if callable(self.scf):
+            return self.scf(val)
+        return super(CustomTable, self).sql_convert(val)

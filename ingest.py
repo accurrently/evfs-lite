@@ -4,7 +4,9 @@ import logging
 import re, json, datetime, os, hashlib
 from pathlib import Path
 import settings
-from schemas import Events, DATASET_NAME_NOPROJECT, DATASET_NAME
+from schemas import Events, Reports, Arrays
+#from bqtables import BooleanTable, CustomTable, EVBQT, EnumTable, FloatArray, FloatTable
+#from bqtables import NumberTable, StringArray, StringTable
 from xcstorage import get_vehicle_folders, move_xcfiles, get_xc_files
 from google.cloud import bigquery
 
@@ -75,6 +77,11 @@ def process_signal(pcoll, signal_class):
                             create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
                             write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE)))
 
+def record_vehicle_ids(vehicles, client, dataset):
+    tr = dataset.table(Arrays.VehicleIDs.name)
+    tbl = bigquery.Table( tr, schema = Arrays.VehicleIDs.bq_schema())
+    table = client.create_table(tbl)
+    client.create_rows(table, vehicles)
 
 def run(argv=None):
     """
@@ -95,12 +102,13 @@ def run(argv=None):
 
     vehicle_folders = get_vehicle_folders(bucket_name=thebucket)
 
-    logging.info('Creating dataset: {dsname}'.format(dsname=DATASET_NAME))
+    logging.info('Creating dataset: {dsname}'.format(dsname=settings.DATASET_NAME))
 
     bq_client = bigquery.Client(project=known_args.project)
 
-    bq_client.dataset(DATASET_NAME_NOPROJECT).create()
+    bq_ds = bq_client.dataset(settings.REPORT_NAME).create()
 
+    vehicles = []
 
     for folder in vehicle_folders:
 
@@ -126,14 +134,14 @@ def run(argv=None):
         # Pull out the Odometer signals and write them to their own table
         process_signal(xcevents, Events.Odometer)
 
-        # Pull out Engine Run Status signals and write them to their own table
+        # Pull out Engine and Ignition statuses
         process_signal(xcevents, Events.EngineStatus)
+        process_signal(xcevents, Events.IngnitionStatus)
 
         # Pull out Engine Speed signals and write them to their own table
         process_signal(xcevents, Events.EngineSpeed)
-
-        # Pull out Ignition signals and write them to their own table
-        process_signal(xcevents, Events.IngnitionStatus)
+        # Get vehicle speed information
+        process_signal(xcevents, Events.VehicleSpeed)
 
         # Pull out Latitude and Longitude signals and write them to their own table
         process_signal(xcevents, Events.Latitude)
@@ -142,16 +150,20 @@ def run(argv=None):
         # Get remaining EV range
         process_signal(xcevents, Events.ElectricRange)
 
-        # Get fuel used since restart
+        # Get fuel information
         process_signal(xcevents, Events.FuelSinceRestart)
+        process_signal(xcevents, Events.FuelLevel)
 
-        # Get vehicle speed information
-        process_signal(xcevents, Events.VehicleSpeed)
 
         result = p.run()
         result.wait_until_finish()
 
-    move_xcfiles(xcfiles, bucket_name='dumbdata')
+        vehicles.append(folder['vehicle_id'])
+
+    record_vehicle_ids(vehicles, bq_client, bq_ds)
+
+
+    #move_xcfiles(xcfiles, bucket_name='dumbdata')
 
 if __name__ == '__main__':
   #logging.basicConfig(filename='testing.log',level=logging.INFO)
